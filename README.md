@@ -5,11 +5,11 @@ Phaseolus Express
 
 Webapp to order bean food.
 Services:
-- OrderBeans -> own Repo (Phaseolus_Order)
-- PayBeancoins -> own Repo (Phaseolus_Payment)
-- CookerBeaners -> own Repo (Phaseolus_Cooker)
-- BeanNotifs -> own Repo (Phaseolus_Notifs)
-Message Broker: RabbitMQ
+- [OrderBeans](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Order)
+- [PayBeancoins](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Pay)
+- [CookerBeaners](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Cooker)
+- [BeanNotifs](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Notifs)
+- Message Broker: RabbitMQ
 
 Orchestration: Kuberenetes
 Clustering: minikube
