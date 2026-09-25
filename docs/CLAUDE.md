@@ -9,6 +9,7 @@ M321_TBZ_Phaseolus_Express is a school project (module M321, TBZ) demonstrating 
 **Phaseolus Express** is the product wrapped around this architecture: a webapp for ordering bean food. It intentionally has a whimsical/joke framing (bean puns) since the priority is the microservice plumbing, not the end-user features.
 
 Services (each its own repo, referenced/orchestrated from here):
+- **BeanApp** — order handling (`Phaseolus_Webapp`)
 - **OrderBeans** — order handling (`Phaseolus_Order`)
 - **PayBeancoins** — payments (`Phaseolus_Payment`)
 - **CookerBeaners** — order fulfillment/kitchen (`Phaseolus_Cooker`)
