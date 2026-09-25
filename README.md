@@ -9,7 +9,7 @@ Services:
 - [PayBeancoins](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Pay)
 - [CookerBeaners](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Cooker)
 - [BeanNotifs](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Notifs)
-Message Broker: RabbitMQ
+- Message Broker: RabbitMQ
 
 Orchestration: Kuberenetes
 Clustering: minikube
