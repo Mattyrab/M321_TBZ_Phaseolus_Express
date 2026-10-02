@@ -16,7 +16,7 @@ Build bottom-up: cluster and shared infra first (nothing custom depends on anyth
 
 ### Step 1 — Stand up minikube and namespaces
 
-⏳ **Do.** `minikube start` with enough resources for 5 services + RabbitMQ + Keycloak + Traefik + Prometheus + Grafana + Argo CD (e.g. `--cpus=4 --memory=8192`, adjust to the dev machine). Create the `phaseolus` and `infra` namespaces (Q6); `argocd`'s namespace is created by its own install in Step 3.
+✅ **Do.** `minikube start` with enough resources for 5 services + RabbitMQ + Keycloak + Traefik + Prometheus + Grafana + Argo CD (e.g. `--cpus=4 --memory=8192`, adjust to the dev machine). Create the `phaseolus` and `infra` namespaces (Q6); `argocd`'s namespace is created by its own install in Step 3.
 
 **Verify.** `kubectl get ns` lists `phaseolus` and `infra`; `kubectl cluster-info` succeeds.
 
