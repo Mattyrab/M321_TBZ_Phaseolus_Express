@@ -24,25 +24,35 @@ Build bottom-up: cluster and shared infra first (nothing custom depends on anyth
 
 ### Step 2 — Install infra components
 
-⏳ **Do.** Into the `infra` namespace, install RabbitMQ, Keycloak, Traefik, and a Prometheus+Grafana stack (e.g. the `kube-prometheus-stack` Helm chart, which bundles both) via their official/community Helm charts — see the implementation-time decision above.
+✅ **Do.** Into the `infra` namespace, install RabbitMQ, Keycloak, Traefik, and a Prometheus+Grafana stack (e.g. the `kube-prometheus-stack` Helm chart, which bundles both) via their official/community Helm charts — see the implementation-time decision above.
 
 **Verify.** `kubectl get pods -n infra` shows all five infra pods `Running`; RabbitMQ's management UI, Keycloak's admin console, and Grafana are each reachable via `kubectl port-forward` for setup purposes.
+
+✅ **Done 2026-10-02.** Repos added: `bitnami` (RabbitMQ, Keycloak), `traefik`, `prometheus-community` (`kube-prometheus-stack`, which installs Prometheus + Grafana + Alertmanager + kube-state-metrics + node-exporter together). Two gotchas hit and worth recording so this is reproducible:
+- **Bitnami's August 2025 catalog change broke default images.** `bitnami/rabbitmq` and `bitnami/keycloak` (and their `bitnami/os-shell`, `bitnami/postgresql` dependents) 404 on Docker Hub as of free-tier access — only the `bitnamilegacy/*` org still hosts the last free versions. Both installs needed `--set global.security.allowInsecureImages=true` plus explicit `image.repository=bitnamilegacy/<name>` overrides (and `postgresql.image.repository`/`postgresql.volumePermissions.image.repository` for Keycloak's bundled Postgres subchart).
+- **Keycloak's default `resourcesPreset: small` (768Mi limit) OOM-kills the JVM on boot.** Fixed with `--set resourcesPreset=large`. Plenty of room on this cluster (8GB allocated) to afford it.
+
+Credentials set: RabbitMQ `phaseolus`/`phaseolus`; Keycloak admin `admin`/`phaseolus`; Grafana admin `admin`/`phaseolus` — all dev-only, fine for a local minikube demo, not meant to survive past this plan.
 
 ---
 
 ### Step 3 — Install Argo CD
 
-⏳ **Do.** Apply Argo CD's official install manifest into its own `argocd` namespace (Q6). Access the UI via port-forward for initial setup only (it becomes git-driven once Step 13 lands).
+✅ **Do.** Apply Argo CD's official install manifest into its own `argocd` namespace (Q6). Access the UI via port-forward for initial setup only (it becomes git-driven once Step 13 lands).
 
 **Verify.** `kubectl get pods -n argocd` shows Argo CD components `Running`; `argocd login` (or the UI) succeeds.
+
+✅ **Done 2026-10-05.** One gotcha: plain `kubectl apply -f install.yaml` failed — the `applicationsets.argoproj.io` CRD exceeds the 262144-byte limit on the client-side `last-applied-configuration` annotation. Fixed with `kubectl apply --server-side --force-conflicts`, which applies without that annotation. All 7 Argo CD pods (`argocd-server`, `argocd-repo-server`, `argocd-application-controller`, `argocd-applicationset-controller`, `argocd-dex-server`, `argocd-redis`, `argocd-notifications-controller`) came up `Running`. Login verified directly against `/api/v1/session` with the `admin` user and the auto-generated initial password from the `argocd-initial-admin-secret` secret → `HTTP 200`.
 
 ---
 
 ### Step 4 — Configure the Keycloak realm and client
 
-⏳ **Do.** Create the `phaseolus` realm (Q7). Register `beanapp-client` as a confidential client with the client-credentials grant and service account enabled — no end-user login flow.
+✅ **Do.** Create the `phaseolus` realm (Q7). Register `beanapp-client` as a confidential client with the client-credentials grant and service account enabled — no end-user login flow.
 
 **Verify.** A direct `curl` to the realm's token endpoint with `beanapp-client`'s credentials returns a valid access token (decode it to confirm issuer = the `phaseolus` realm).
+
+✅ **Done 2026-10-05.** Configured via Keycloak's Admin REST API (port-forwarded `svc/keycloak`, authenticated as the `admin` user from Step 2 against the `master` realm). `phaseolus` realm created (`201`); `beanapp-client` created (`201`) with `publicClient: false`, `serviceAccountsEnabled: true`, `standardFlowEnabled: false`, `directAccessGrantsEnabled: false` — i.e. client-credentials/service-account only, matching Q7 exactly. Verification: requested a token via `grant_type=client_credentials` against `/realms/phaseolus/protocol/openid-connect/token` → `HTTP 200`; decoded the JWT payload and confirmed `"iss":"http://localhost:8081/realms/phaseolus"` and `"azp":"beanapp-client"`. No credentials or tokens were printed to the terminal — the client secret and admin token were held in short-lived temp files and deleted after use.
 
 ---
 
