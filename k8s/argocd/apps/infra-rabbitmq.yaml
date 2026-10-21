@@ -1,0 +1,38 @@
+# Adopts the RabbitMQ release already installed manually in Step 2/12 of the
+# architecture plan. Values replicate those `helm install`/`helm upgrade`
+# commands exactly, so this should re-apply as a no-op diff against the
+# live release rather than disturb it (existing PVCs/queues are untouched
+# by a no-diff Deployment/StatefulSet spec re-apply).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-rabbitmq
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    targetRevision: 16.0.14
+    helm:
+      valuesObject:
+        auth:
+          username: phaseolus
+          password: phaseolus
+        global:
+          security:
+            allowInsecureImages: true
+        image:
+          repository: bitnamilegacy/rabbitmq
+        volumePermissions:
+          image:
+            repository: bitnamilegacy/os-shell
+        extraConfiguration: |-
+          prometheus.return_per_object_metrics = true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infra
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
