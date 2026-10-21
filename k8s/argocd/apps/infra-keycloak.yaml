@@ -1,0 +1,45 @@
+# Adopts the Keycloak release already installed manually in Step 2 of the
+# architecture plan. Values replicate that `helm install` exactly (including
+# the resourcesPreset bump that fixed an OOMKill), so this re-applies as a
+# no-op diff rather than disturbing the live phaseolus realm/client.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-keycloak
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: keycloak
+    targetRevision: 25.2.0
+    helm:
+      valuesObject:
+        auth:
+          adminUser: admin
+          adminPassword: phaseolus
+        global:
+          security:
+            allowInsecureImages: true
+        image:
+          repository: bitnamilegacy/keycloak
+        keycloakConfigCli:
+          image:
+            repository: bitnamilegacy/keycloak-config-cli
+        postgresql:
+          image:
+            repository: bitnamilegacy/postgresql
+          volumePermissions:
+            image:
+              repository: bitnamilegacy/os-shell
+          metrics:
+            image:
+              repository: bitnamilegacy/postgres-exporter
+        resourcesPreset: large
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infra
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
