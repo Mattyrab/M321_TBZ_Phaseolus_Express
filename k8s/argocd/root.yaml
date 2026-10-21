@@ -1,0 +1,23 @@
+# The App-of-Apps root. Applied once manually to bootstrap Argo CD
+# (architecture plan Step 13) -- every other Application in k8s/argocd/apps/
+# is then created and managed by Argo CD itself from here on.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: phaseolus-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Mattyrab/M321_TBZ_Phaseolus_Express.git
+    targetRevision: main
+    path: k8s/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
