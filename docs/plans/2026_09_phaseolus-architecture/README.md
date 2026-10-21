@@ -1,6 +1,6 @@
 # Phaseolus Architecture
 
-✅ **Status:** implementation plan drafted — all phases done. First rough draft of the Phaseolus Express microservice architecture — services, message broker, IAM, metrics, and deployment/orchestration for the M321 school project. Ready for team review before starting Step 1.
+✅ **Status:** execution in progress — Steps 1–12 done and live-verified on minikube (full order flow via Traefik, metrics flowing into a working Grafana dashboard). Steps 13–14 (Argo CD App-of-Apps cutover, final checklist) remain. First rough draft of the Phaseolus Express microservice architecture for the M321 school project.
 
 ## Why this exists
 

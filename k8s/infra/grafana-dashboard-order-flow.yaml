@@ -1,0 +1,89 @@
+# Discovered by the kube-prometheus-stack Grafana sidecar (LABEL=grafana_dashboard,
+# NAMESPACE=ALL), so this can live in `infra` alongside the rest of this meta repo's
+# infra manifests regardless of which namespace Grafana itself runs in.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-order-flow
+  namespace: infra
+  labels:
+    grafana_dashboard: "1"
+data:
+  order-flow.json: |
+    {
+      "title": "Phaseolus Order Flow",
+      "uid": "phaseolus-order-flow",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "time": { "from": "now-15m", "to": "now" },
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Request rate per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "expr": "sum by (job) (rate(http_request_duration_seconds_count{namespace=\"phaseolus\"}[5m]))",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Request latency p95 per service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket{namespace=\"phaseolus\"}[5m])))",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "RabbitMQ queue depth (messages ready)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "expr": "rabbitmq_queue_messages_ready{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-failed|notifs.order-cooked\"}",
+              "legendFormat": "{{queue}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "RabbitMQ message publish rate per queue",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "expr": "sum by (queue) (rate(rabbitmq_queue_messages_published_total{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-failed|notifs.order-cooked\"}[5m]))",
+              "legendFormat": "{{queue}}",
+              "refId": "A"
+            }
+          ]
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {}
+          }
+        ]
+      }
+    }

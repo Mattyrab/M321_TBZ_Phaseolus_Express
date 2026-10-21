@@ -1,0 +1,57 @@
+# RabbitMQ's rabbitmq_prometheus plugin is enabled by default in the Bitnami chart
+# and listens on port 9419, but the Helm-managed `rabbitmq` Service doesn't expose it.
+# This Service/ServiceMonitor pair is additive and owned by this meta repo (not the
+# Helm release), so it survives `helm upgrade` without being overwritten.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-metrics
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: rabbitmq-metrics
+spec:
+  selector:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/instance: rabbitmq
+  ports:
+    - name: metrics
+      port: 9419
+      targetPort: 9419
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq
+  namespace: infra
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq-metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+---
+# The Helm-managed `rabbitmq` NetworkPolicy only allows ingress on the AMQP/management
+# ports (4369, 5671/5672, 15672, 25672) — not 9419, which silently drops Prometheus's
+# scrapes (timeout, not refused). NetworkPolicies selecting the same pods are additive
+# (union of allow-rules), so this supplementary policy just opens 9419 without touching
+# the Helm-owned one, and survives `helm upgrade`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-allow-metrics-scrape
+  namespace: infra
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: rabbitmq
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 9419
+          protocol: TCP

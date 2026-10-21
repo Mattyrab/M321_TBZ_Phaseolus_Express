@@ -58,65 +58,88 @@ Credentials set: RabbitMQ `phaseolus`/`phaseolus`; Keycloak admin `admin`/`phase
 
 ### Step 5 — Agree the service-repo convention, scaffold all five
 
-⏳ **Do.** With your teammate (Q1), agree and apply to all five service repos: the Dockerfile shape (multi-stage, `sdk:8.0` → `aspnet:8.0`, per Q2), the ASP.NET Core Minimal API project skeleton (each exposing at least a `/metrics` endpoint via `prometheus-net`), and the `/deploy/deployment.yaml` + `/deploy/service.yaml` pair (plain YAML, `imagePullPolicy: Never`, per Q3/Q4) with a placeholder image tag.
+**Detailed design:** see [`../2026_10_service-api-template/`](../2026_10_service-api-template/) — the code-level shape of the template, which repo is the reference implementation, and the exact per-service deltas.
+
+✅ **Do.** With your teammate (Q1), agree and apply to all five service repos: the Dockerfile shape (multi-stage, `sdk:8.0` → `aspnet:8.0`, per Q2), the ASP.NET Core Minimal API project skeleton (each exposing at least a `/metrics` endpoint via `prometheus-net`), and the `/deploy/deployment.yaml` + `/deploy/service.yaml` pair (plain YAML, `imagePullPolicy: Never`, per Q3/Q4) with a placeholder image tag.
 
 **Verify.** Each of the five repos: `dotnet build` succeeds, `docker build` succeeds, and `kubectl apply --dry-run=client -f deploy/` validates without error.
+
+✅ **Done 2026-10-20/21.** OrderBeans/PayBeancoins/CookerBeaners/BeanNotifs were scaffolded and implemented by Matthew on 2026-10-20 per the `service-api-template` sub-plan, merged via PR with Tim Kunz. BeanApp (this session, 2026-10-21) had app logic already (Keycloak token client, OrderBeans HTTP client, Cart checkout) but was missing its Dockerfile/deploy manifest and had leftover ASP.NET Identity + a standalone PostgreSQL dependency (default template scaffolding, unused by any page) — **removed entirely** per explicit decision, since IAM was scoped to OrderBeans only (Q7), not end-user login. Added BeanApp's Dockerfile (repo-root context, since its `.sln`/`.csproj` are nested under `WebApp/WebApp/`) and `/deploy/*`. All five: `dotnet build` ✅, `docker build` ✅, `kubectl apply --dry-run=client` ✅.
+Two real bugs found and fixed along the way:
+- **Keycloak port bug:** OrderBeans' and BeanApp's config pointed `Keycloak:Authority` at `keycloak.infra.svc.cluster.local:8080`, but the Keycloak Service only exposes port 80 (confirmed via `kubectl get svc keycloak -n infra`). Fixed in both `appsettings.json` files and in OrderBeans' `deploy/deployment.yaml` env var (the one that actually matters at runtime).
+- **Windows/.NET Docker build bug:** BeanApp's Docker build failed with a NuGet `ResolvePackageAssets` error referencing `C:\Program Files (x86)\Microsoft Visual Studio\Shared\NuGetPackages` — a Windows-only fallback folder baked into the host's locally-built `obj/project.assets.json` (nested under `WebApp/WebApp/obj/`), which leaked into the Docker build context. Fixed by deleting the stale `bin/`/`obj/` folders and hardening `.dockerignore` to `**/bin/`/`**/obj/` (bare `bin/`/`obj/` wasn't reliably excluding the nested path) — relevant for your teammate's machine too.
 
 ---
 
 ### Step 6 — Implement OrderBeans
 
-⏳ **Do.** `POST /orders` endpoint: validates the caller's Keycloak bearer token (Q7, `JwtBearer` against the `phaseolus` realm's OIDC discovery doc — issuer/signature/expiry only); on success, publishes `order.created` to `phaseolus.events` with the Q5 payload shape.
+✅ **Do.** `POST /orders` endpoint: validates the caller's Keycloak bearer token (Q7, `JwtBearer` against the `phaseolus` realm's OIDC discovery doc — issuer/signature/expiry only); on success, publishes `order.created` to `phaseolus.events` with the Q5 payload shape.
 
 **Verify.** `curl -X POST` with no `Authorization` header → `401`. The same request with a client-credentials token from Step 4 → `2xx`, and the message appears in the `pay.incoming-orders` queue (checked via RabbitMQ's management UI/API).
+
+✅ **Done 2026-10-21 (live, against the deployed cluster).** `curl -X POST /orders` with no `Authorization` header → `401`. With a client-credentials token fetched **from inside the cluster** (a throwaway `curlimages/curl` pod — a token fetched via host port-forward has a different `iss` claim and is correctly rejected, which is *not* a bug, just means the test has to originate in-cluster) → `202` with a real `orderId`. One real debugging detour: an initial in-cluster-token test still got `401` with `SecurityTokenInvalidSignatureException`; independent signature verification (Node crypto, cross-checked against both the JWK `n`/`e` and the `x5c` cert) also failed — traced to `kubectl run`'s own `pod "..." deleted` status message getting concatenated onto the captured token's signature segment by a sloppy `tail -1` capture, not a real Keycloak/OrderBeans bug. Fixed the capture method (`kubectl logs` after `kubectl wait --for=jsonpath='{.status.phase}'=Succeeded`), re-verified the signature as valid, and the request succeeded.
 
 ---
 
 ### Step 7 — Implement PayBeancoins
 
-⏳ **Do.** Consumes `pay.incoming-orders`; applies the deterministic "Rotten Beans" rule (Q8); publishes `payment.succeeded` or `payment.failed` accordingly.
+✅ **Do.** Consumes `pay.incoming-orders`; applies the deterministic "Rotten Beans" rule (Q8); publishes `payment.succeeded` or `payment.failed` accordingly.
 
 **Verify.** An order with normal items → a `payment.succeeded` message appears in `cooker.paid-orders`. An order containing an item named `"Rotten Beans"` (any case) → a `payment.failed` message (with the `reason` from Q8) appears in `notifs.payment-failed`, and nothing appears in `cooker.paid-orders` for that order.
+
+✅ **Done 2026-10-21 (live).** Verified indirectly but conclusively via BeanNotifs' `/notifications` (Step 9) rather than inspecting RabbitMQ queues directly: a normal order resulted in an `order-cooked` entry (proving `payment.succeeded` → CookerBeaners fired), and a `"Rotten Beans"` order resulted in a `payment-failed` entry reading `"Payment failed: Simulated failure: Rotten Beans"` with **no** corresponding `order-cooked` entry for that `orderId` — confirming CookerBeaners never received anything for the failed payment.
 
 ---
 
 ### Step 8 — Implement CookerBeaners
 
-⏳ **Do.** Consumes `cooker.paid-orders`; publishes `order.cooked`.
+✅ **Do.** Consumes `cooker.paid-orders`; publishes `order.cooked`.
 
 **Verify.** Following a successful-payment message from Step 7, a message appears in `notifs.order-cooked`.
+
+✅ **Done 2026-10-21 (live).** Same evidence as Step 7: the normal order's `order-cooked` notification is proof CookerBeaners consumed `payment.succeeded` and published correctly; the Rotten-Beans order producing zero `order-cooked` entries is proof it correctly never fires on a failed payment.
 
 ---
 
 ### Step 9 — Implement BeanNotifs
 
-⏳ **Do.** Consumes both `notifs.payment-failed` and `notifs.order-cooked` (Q5's dual-event consumer). Records each as a structured log line plus an in-memory list exposed via `GET /notifications` — a real delivery channel (email/SMS/push) is out of scope per `10_target_shape.md`'s non-goals; this just needs to be *observable* for the demo.
+✅ **Do.** Consumes both `notifs.payment-failed` and `notifs.order-cooked` (Q5's dual-event consumer). Records each as a structured log line plus an in-memory list exposed via `GET /notifications` — a real delivery channel (email/SMS/push) is out of scope per `10_target_shape.md`'s non-goals; this just needs to be *observable* for the demo.
 
 **Verify.** `GET /notifications` shows one entry for a normal order (order-cooked) and one entry for a Rotten-Beans order (payment-failed), each traceable to its `orderId`.
+
+✅ **Done 2026-10-21 (live).** `GET /notifications` on the deployed pod returned exactly this: one `order-cooked` entry and one `payment-failed` entry, each with the correct `orderId` matching the order that produced it, plus a third entry once Step 10 was tested (see below). Dual-event consumption confirmed working.
 
 ---
 
 ### Step 10 — Implement BeanApp
 
-⏳ **Do.** Minimal ordering UI/API (per `10_target_shape.md`'s non-goal on UX polish). On request, fetches a client-credentials token from Keycloak (Step 4) and calls OrderBeans' `POST /orders` with it attached. Supports submitting an order containing `"Rotten Beans"`, either as a selectable item or free text, to trigger the failure path on demand.
+✅ **Do.** Minimal ordering UI/API (per `10_target_shape.md`'s non-goal on UX polish). On request, fetches a client-credentials token from Keycloak (Step 4) and calls OrderBeans' `POST /orders` with it attached. Supports submitting an order containing `"Rotten Beans"`, either as a selectable item or free text, to trigger the failure path on demand.
 
 **Verify.** Full end-to-end: placing a normal order results in a `GET /notifications` (BeanNotifs) entry for "order cooked"; placing a Rotten-Beans order results in a "payment failed" entry, and CookerBeaners never logs/publishes anything for that order.
+
+✅ **Done 2026-10-21 (live, via the real Cart page, not a direct API call).** Fetched BeanApp's `/Cart` page to get a valid antiforgery token + session cookie, then POSTed a checkout form submission exactly as a browser would. Response: `"Order placed! OrderBeans accepted it."` — and the resulting order appeared as a new `order-cooked` entry in BeanNotifs, confirming the full chain (BeanApp → Keycloak token fetch → OrderBeans → RabbitMQ → PayBeancoins → CookerBeaners → BeanNotifs) works through the actual UI, not just direct service-to-service calls.
 
 ---
 
 ### Step 11 — Expose BeanApp via Traefik
 
-⏳ **Do.** Add an `IngressRoute`/`Ingress` (wherever each service's own manifest lives, per Q3) so Traefik is the only externally-reachable path to BeanApp.
+✅ **Do.** Add an `IngressRoute`/`Ingress` (wherever each service's own manifest lives, per Q3) so Traefik is the only externally-reachable path to BeanApp.
 
 **Verify.** The Traefik-exposed host/path reaches BeanApp; none of the other four services are reachable from outside the cluster (no stray `NodePort`/`LoadBalancer` Services).
+
+✅ **Done 2026-10-21 (live).** Added `deploy/ingressroute.yaml` to BeanApp's own repo (per-service manifest ownership, consistent with Q3) — a Traefik `IngressRoute` on the `web` entryPoint matching `PathPrefix(\`/\`)`, routing to the `beanapp` Service. Verified via `minikube service traefik -n infra --url` (a real external tunnel, not `kubectl port-forward`): `GET /Cart` → `200`, and `GET /` returned BeanApp's actual homepage title, confirming genuine external routing through Traefik rather than a coincidental match. Confirmed all five `phaseolus` Services are plain `ClusterIP` (`kubectl get svc -n phaseolus`) and `beanapp` is the only `IngressRoute` in the namespace — no other service has any external path.
 
 ---
 
 ### Step 12 — Wire Prometheus scraping and a Grafana dashboard
 
-⏳ **Do.** Configure Prometheus (via the `kube-prometheus-stack`'s `ServiceMonitor` CRDs, or static scrape configs) to scrape all five services' `/metrics` across the `phaseolus` namespace, plus RabbitMQ's metrics. Build one Grafana dashboard: request count/latency per service, and queue depth for the four queues from Q5.
+✅ **Do.** Configure Prometheus (via the `kube-prometheus-stack`'s `ServiceMonitor` CRDs, or static scrape configs) to scrape all five services' `/metrics` across the `phaseolus` namespace, plus RabbitMQ's metrics. Build one Grafana dashboard: request count/latency per service, and queue depth for the four queues from Q5.
 
 **Verify.** After running a few orders through the flow (including one Rotten-Beans order), the Grafana dashboard shows non-zero, moving data for each panel.
+
+✅ **Done 2026-10-21 (live).** Added a `ServiceMonitor` to each of the five services' own `/deploy` (per-service manifest ownership, Q3) — required adding `name: http` + a matching `labels.app` to each `service.yaml` first, since ServiceMonitor selects Services by label and endpoints by named port. RabbitMQ was handled separately in this meta repo (`k8s/infra/rabbitmq-metrics.yaml`), since it's an infra-level concern per Option C: a `rabbitmq-metrics` Service exposing port 9419 (the `rabbitmq_prometheus` plugin's port — confirmed enabled but **not exposed by the Helm-managed Service**), its `ServiceMonitor`, and a supplementary `NetworkPolicy` opening ingress on 9419 (the Helm-managed RabbitMQ `NetworkPolicy` only allows the AMQP/management ports — NetworkPolicies on the same pods are additive/union, so this doesn't touch the Helm-owned one and survives `helm upgrade`). Also upgraded the RabbitMQ release with `extraConfiguration: "prometheus.return_per_object_metrics = true"` — off by default, which meant `rabbitmq_queue_messages_ready` etc. only reported one aggregate series with no `queue` label; this is required for genuine per-queue panels.
+
+All 6 scrape targets (`orderbeans`, `paybeancoins`, `cookerbeaners`, `beannotifs`, `beanapp`, `rabbitmq-metrics`) confirmed `up` in Prometheus. Built `k8s/infra/grafana-dashboard-order-flow.yaml` (a ConfigMap labeled `grafana_dashboard: "1"`, auto-discovered by the chart's Grafana sidecar, which watches all namespaces) with four panels: request rate per service, p95 latency per service, RabbitMQ queue depth, and per-queue publish rate. After placing a normal order and a Rotten-Beans order, queried all four panels' exact PromQL through Grafana's own datasource proxy (not just Prometheus directly) and confirmed non-zero, correctly-labeled data on every one.
 
 ---
 
