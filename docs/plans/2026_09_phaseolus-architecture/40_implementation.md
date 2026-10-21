@@ -167,12 +167,24 @@ All 6 scrape targets (`orderbeans`, `paybeancoins`, `cookerbeaners`, `beannotifs
 
 ### Step 14 — End-to-end verification against `10_target_shape.md`
 
-⏳ **Do.** Walk the `10_target_shape.md` success-criteria list explicitly as a checklist rather than assuming prior steps covered it:
+✅ **Do.** Walk the `10_target_shape.md` success-criteria list explicitly as a checklist rather than assuming prior steps covered it:
 - Full order flow traceable through RabbitMQ (Steps 6–10).
 - Unauthenticated vs. authenticated request to OrderBeans (Step 6).
 - Grafana shows live per-service and RabbitMQ data (Step 12).
 - A manifest/tag change reaches the cluster via Argo CD alone (Step 13).
 - `kubectl get pods -A` shows all five services + all infra running, Traefik as the only ingress (Steps 1–13 combined).
+
+**Verify.** Each bullet confirmed against the running cluster, not just against individual step verifications in isolation — this step exists because passing each step locally doesn't guarantee the *combined* system satisfies every criterion simultaneously.
+
+✅ **Done 2026-10-21 — all 5 `10_target_shape.md` success criteria confirmed live, fresh, against the post-incident cluster state (not reused from earlier step verifications, except where noted):**
+
+1. **Full order flow traceable through RabbitMQ.** Placed a fresh order directly against OrderBeans (`orderId 7b2202b6-...`) and confirmed it reached `order-cooked` in BeanNotifs — i.e. OrderBeans → `order.created` → PayBeancoins → `payment.succeeded` → CookerBeaners → `order.cooked` → BeanNotifs, the full chain, traced via the `/notifications` endpoint (which is itself backed entirely by consumed RabbitMQ messages).
+2. **Unauthenticated vs. authenticated request to OrderBeans.** Re-tested against the *rebuilt* Keycloak realm (post-incident): no `Authorization` header → `401`; a token fetched fresh from inside the cluster → `202` with a real `orderId`.
+3. **Grafana shows live per-service and RabbitMQ data.** All 6 Prometheus scrape targets (`orderbeans`, `paybeancoins`, `cookerbeaners`, `beannotifs`, `beanapp`, `rabbitmq-metrics`) confirmed `up`. Queried the dashboard's actual panel PromQL through Grafana's own datasource proxy: non-zero per-service request rate, and non-zero per-queue publish rate for all four queues — including `notifs.payment-failed`, confirming the per-object RabbitMQ metrics config survived the Step 13 reinstall.
+4. **A manifest/tag change reaches the cluster via Argo CD alone.** Already demonstrated unprompted during Step 13's incident recovery: merging the Keycloak-client-secret fix PR caused Argo CD to redeploy BeanApp's Deployment with the new value automatically — zero manual `kubectl` involvement, observed in real time. Reused here rather than re-run, since it's the identical mechanism this criterion asks for.
+5. **`kubectl get pods -A` shows everything running, Traefik as the only ingress.** All five `phaseolus` services, all `infra` components, and `argocd` itself confirmed `Running`. Checked every namespace for `LoadBalancer`/`NodePort` Services: **Traefik is the only one** in the entire cluster. Exactly one `IngressRoute` exists (`beanapp`).
+
+**Overall result: the architecture plan's target shape is met.** The system doesn't just pass each step in isolation — the combined, currently-running cluster satisfies all five success criteria simultaneously, re-verified after (and despite) the Step 13 incident.
 
 **Verify.** Each bullet confirmed against the running cluster, not just against individual step verifications in isolation — this step exists because passing each step locally doesn't guarantee the *combined* system satisfies every criterion simultaneously.
 
