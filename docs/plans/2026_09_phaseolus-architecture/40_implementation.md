@@ -145,9 +145,23 @@ All 6 scrape targets (`orderbeans`, `paybeancoins`, `cookerbeaners`, `beannotifs
 
 ### Step 13 — Wire the Argo CD App-of-Apps
 
-⏳ **Do.** In this meta repo, add the root Argo CD `Application` (app-of-apps pattern, `20_options.md`): one child `Application` per service repo (source: `<repo>/deploy`, per Q3) plus Applications for the Step 2 infra charts. Apply the root Application once manually — this is the one allowed `kubectl apply`, bootstrapping Argo CD to manage everything from here on.
+⚠️ **Do.** In this meta repo, add the root Argo CD `Application` (app-of-apps pattern, `20_options.md`): one child `Application` per service repo (source: `<repo>/deploy`, per Q3) plus Applications for the Step 2 infra charts. Apply the root Application once manually — this is the one allowed `kubectl apply`, bootstrapping Argo CD to manage everything from here on.
 
 **Verify.** Argo CD's UI shows every child Application `Synced`/`Healthy`. Bump an image's git-SHA tag (per Q4's flow: `minikube image load` the new image, then edit the tag in the service repo's `/deploy/deployment.yaml` and push) and confirm Argo CD reconciles the running Deployment **without** a manual `kubectl apply`/`kubectl set image`.
+
+⚠️ **Done 2026-10-21, with reduced scope after a real incident.** The App-of-Apps pattern is live and working for the five services plus this meta repo's own `k8s/infra/` plain manifests (6 child Applications, all `Synced`/`Healthy`) — **but the four infra Helm charts (RabbitMQ, Keycloak, Traefik, Prometheus stack) were deliberately reverted to manual Helm management**, not GitOps-adopted, after attempting it caused real damage:
+
+**What went wrong.** Argo CD's Helm source templating uses the *Application's own name* as the Helm release name by default. Setting `source.helm.releaseName` to match the original manual release names (`rabbitmq`, `keycloak`, `traefik`, `prometheus`) was supposed to make the first sync a no-op diff against the already-running state. Instead, the first sync (before the fix) created differently-named duplicate resources, and a later reconcile — after the `releaseName` fix — **deleted the original RabbitMQ/Keycloak/Traefik StatefulSets, Services, and (for Keycloak) the Postgres credentials Secret outright**, rather than adopting them in place. Disabling `syncPolicy.automated` did not reliably stop an already-queued sync operation from completing, so the Applications had to be deleted outright (`--cascade=orphan`) to actually stop the churn — twice, since one got recreated again by the root Application's own reconcile before the git revert was merged.
+
+**What was lost vs. recovered.**
+- **RabbitMQ**: fully recovered. `helm upgrade` with the original values reattached to the surviving `data-rabbitmq-0` PVC — no data loss.
+- **Traefik**: nothing to lose (stateless); trivially recreated.
+- **Keycloak**: **not recoverable**. The Postgres credentials Secret was deleted along with the StatefulSet, so the existing data PVC couldn't be reattached (wrong/unknown password). Had to delete the orphaned PVC and do a clean `helm uninstall` + `helm install`, then **redo Step 4 from scratch** (recreate the `phaseolus` realm and `beanapp-client`, fetch the new client secret, update BeanApp's deploy manifest and redeploy). This is a real, explicit decision point the user approved mid-incident (see `AskUserQuestion` log in the session) rather than something fixed silently.
+- **Prometheus stack**: survived untouched — caught and stopped before its (slower, larger) reconcile reached the prune step.
+
+**Final state (re-verified live, 2026-10-21):** full order flow through BeanApp's real Cart page — normal order → `order-cooked`; `"Rotten Beans"` order → `payment-failed`, no `order-cooked` — works end-to-end exactly as before the incident. Argo CD auto-synced the corrected Keycloak client secret into BeanApp's Deployment the moment the fix PR merged, with **zero manual `kubectl` action** — this is itself a direct, if unplanned, demonstration of the sync criterion this step asks for (just via an env var change rather than an image-tag bump). `helm list -n infra` shows all four infra releases `deployed` cleanly, no duplicate resources anywhere, 6 Argo Applications all `Synced`/`Healthy`.
+
+**Standing decision:** the four infra Helm charts remain manually Helm-managed going forward (not GitOps-owned), per `20_options.md`'s spirit of keeping this meta repo's automated surface area matched to what's actually been proven safe — full infra-into-Argo-CD adoption is parked as a followup (`50_followups.md`) rather than reattempted blindly.
 
 ---
 
