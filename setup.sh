@@ -233,6 +233,30 @@ for app in orderbeans paybeancoins cookerbeaners beannotifs beanapp; do
   kubectl wait --for=jsonpath='{.status.health.status}'=Healthy "application/$app" -n argocd --timeout=180s || true
 done
 
+# ---------------------------------------------------------------------------
+# 8. Port-forwards for manual browsing (BeanApp, monitoring, message queue)
+# ---------------------------------------------------------------------------
+log "Starting port-forwards for manual access"
+
+PF_PID_FILE="$SCRIPT_DIR/.phaseolus-port-forwards.pid"
+: > "$PF_PID_FILE"
+
+start_port_forward() {
+  local name="$1" namespace="$2" service="$3" ports="$4"
+  nohup kubectl -n "$namespace" port-forward "svc/$service" "$ports" \
+    >"/tmp/phaseolus-pf-${name}.log" 2>&1 &
+  disown
+  echo "${name}:$!" >> "$PF_PID_FILE"
+}
+
+start_port_forward beanapp    phaseolus beanapp 5050:8080
+start_port_forward grafana    infra     prometheus-grafana 3000:80
+start_port_forward rabbitmq   infra     rabbitmq 15672:15672
+start_port_forward keycloak   infra     keycloak 8180:80
+start_port_forward prometheus infra     prometheus-kube-prometheus-prometheus 9090:9090
+start_port_forward argocd     argocd    argocd-server 8443:443
+sleep 3
+
 log "Done"
 echo "Namespaces:"
 kubectl get pods -n phaseolus
@@ -241,11 +265,16 @@ echo
 echo "Argo CD Applications:"
 kubectl get application -n argocd
 echo
-echo "To reach BeanApp from outside the cluster, run in a separate terminal:"
-echo "  minikube service traefik -n infra --url"
+echo "Manual access (port-forwards running in the background -- PIDs in $PF_PID_FILE):"
+echo "  BeanApp             http://localhost:5050"
+echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
+echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD"
+echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
+echo "  Prometheus          http://localhost:9090"
+echo "  Argo CD UI          https://localhost:8443   admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
 echo
-echo "Admin credentials (dev-only, not production-grade):"
-echo "  RabbitMQ:    phaseolus / $RABBITMQ_PASSWORD"
-echo "  Keycloak:    admin / $KEYCLOAK_ADMIN_PASSWORD"
-echo "  Grafana:     admin / $GRAFANA_PASSWORD"
-echo "  Argo CD:     admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+echo "To stop the port-forwards later:"
+echo "  awk -F: '{print \$2}' $PF_PID_FILE | xargs -r kill"
+echo
+echo "To reach BeanApp via Traefik (the real ingress path) instead, run in a separate terminal:"
+echo "  minikube service traefik -n infra --url"
