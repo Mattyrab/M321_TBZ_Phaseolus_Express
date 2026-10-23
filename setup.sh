@@ -117,7 +117,8 @@ helm upgrade --install rabbitmq bitnami/rabbitmq -n infra --version 16.0.14 \
   --set global.security.allowInsecureImages=true \
   --set image.repository=bitnamilegacy/rabbitmq \
   --set volumePermissions.image.repository=bitnamilegacy/os-shell \
-  --set-string extraConfiguration="prometheus.return_per_object_metrics = true"
+  --set-string extraConfiguration="prometheus.return_per_object_metrics = true" \
+  --set resourcesPreset=large
 
 helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
   --set auth.adminUser=admin \
