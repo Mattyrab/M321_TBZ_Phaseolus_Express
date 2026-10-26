@@ -230,8 +230,26 @@ kubectl apply -f k8s/argocd/root.yaml
 kubectl apply -f k8s/infra/
 
 log "Waiting for the five services to come up via Argo CD"
+
+# `kubectl wait` only waits for a condition on a resource that already exists --
+# it fails immediately with NotFound if Argo CD hasn't finished its first
+# reconcile of phaseolus-root yet (which creates these Application objects).
+# Poll for existence first, then wait for health.
+wait_for_app_healthy() {
+  local app="$1" timeout="${2:-180}" elapsed=0
+  while ! kubectl get "application/$app" -n argocd &>/dev/null; do
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo "WARNING: application/$app never appeared within ${timeout}s" >&2
+      return 1
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  kubectl wait --for=jsonpath='{.status.health.status}'=Healthy "application/$app" -n argocd --timeout="${timeout}s" || true
+}
+
 for app in orderbeans paybeancoins cookerbeaners beannotifs beanapp; do
-  kubectl wait --for=jsonpath='{.status.health.status}'=Healthy "application/$app" -n argocd --timeout=180s || true
+  wait_for_app_healthy "$app" 180
 done
 
 # ---------------------------------------------------------------------------
