@@ -212,12 +212,42 @@ curl -s -o /dev/null -w "client create: %{http_code}\n" \
     protocol: "openid-connect",
     publicClient: false,
     serviceAccountsEnabled: true,
-    standardFlowEnabled: false,
+    standardFlowEnabled: true,
     directAccessGrantsEnabled: false,
     authorizationServicesEnabled: false,
     enabled: true,
-    secret: $secret
+    secret: $secret,
+    redirectUris: ["*"],
+    webOrigins: ["*"],
+    attributes: { "post.logout.redirect.uris": "+" }
   }')"
+
+# Admin-login feature: a realm role + demo user so the BeanApp Admin page
+# (view-only orders/payments/notifications log) has someone to log in as.
+curl -s -o /dev/null -w "admin role create: %{http_code}\n" \
+  -X POST http://localhost:18081/admin/realms/phaseolus/roles \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"admin","description":"Phaseolus Express admin role"}'
+
+curl -s -o /dev/null -w "admin user create: %{http_code}\n" \
+  -X POST http://localhost:18081/admin/realms/phaseolus/users \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "enabled": true,
+    "emailVerified": true,
+    "credentials": [{"type": "password", "value": "phaseolus", "temporary": false}]
+  }'
+
+ADMIN_ROLE=$(curl -s http://localhost:18081/admin/realms/phaseolus/roles/admin \
+  -H "Authorization: Bearer $ADMIN_TOKEN")
+ADMIN_USER_ID=$(curl -s "http://localhost:18081/admin/realms/phaseolus/users?username=admin&exact=true" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+
+curl -s -o /dev/null -w "admin role assign: %{http_code}\n" \
+  -X POST "http://localhost:18081/admin/realms/phaseolus/users/$ADMIN_USER_ID/role-mappings/realm" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "[$ADMIN_ROLE]"
 
 kill $KC_PF_PID 2>/dev/null || true
 trap - EXIT
@@ -285,7 +315,7 @@ echo "Argo CD Applications:"
 kubectl get application -n argocd
 echo
 echo "Manual access (port-forwards running in the background -- PIDs in $PF_PID_FILE):"
-echo "  BeanApp             http://localhost:5050"
+echo "  BeanApp             http://localhost:5050   (Admin page login: admin / phaseolus)"
 echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
 echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD"
 echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
