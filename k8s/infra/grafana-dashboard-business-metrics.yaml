@@ -27,7 +27,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "suffix: ops" }, "overrides": [] },
           "targets": [
             {
-              "expr": "sum(rate(orders_placed_total[5m]))",
+              "expr": "round(sum(increase(orders_placed_total[5m])))",
               "legendFormat": "Orders placed",
               "refId": "A"
             }
@@ -47,8 +47,8 @@ data:
             ]
           },
           "targets": [
-            { "expr": "sum(rate(payments_succeeded_total[5m]))", "legendFormat": "Succeeded", "refId": "A" },
-            { "expr": "sum(rate(payments_failed_total[5m]))", "legendFormat": "Failed", "refId": "B" }
+            { "expr": "round(sum(increase(payments_succeeded_total[5m])))", "legendFormat": "Succeeded", "refId": "A" },
+            { "expr": "round(sum(increase(payments_failed_total[5m])))", "legendFormat": "Failed", "refId": "B" }
           ]
         },
         {
@@ -65,8 +65,8 @@ data:
             ]
           },
           "targets": [
-            { "expr": "sum(rate(orders_cooking_started_total[5m]))", "legendFormat": "Started cooking", "refId": "A" },
-            { "expr": "sum(rate(orders_cooked_total[5m]))", "legendFormat": "Cooked", "refId": "B" }
+            { "expr": "round(sum(increase(orders_cooking_started_total[5m])))", "legendFormat": "Started cooking", "refId": "A" },
+            { "expr": "round(sum(increase(orders_cooked_total[5m])))", "legendFormat": "Cooked", "refId": "B" }
           ]
         },
         {
@@ -78,7 +78,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "suffix: ops" }, "overrides": [] },
           "targets": [
             {
-              "expr": "sum(rate(notifications_sent_total[5m]))",
+              "expr": "round(sum(increase(notifications_sent_total[5m])))",
               "legendFormat": "Notifications sent",
               "refId": "A"
             }
@@ -91,7 +91,7 @@ data:
           "gridPos": { "h": 6, "w": 4, "x": 0, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
-          "targets": [{ "expr": "sum(increase(orders_placed_total[$__range])) or vector(0)", "refId": "A" }]
+          "targets": [{ "expr": "round(sum(increase(orders_placed_total[$__range])) or vector(0))", "refId": "A" }]
         },
         {
           "id": 6,
@@ -100,7 +100,7 @@ data:
           "gridPos": { "h": 6, "w": 4, "x": 4, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
-          "targets": [{ "expr": "sum(increase(payments_succeeded_total[$__range])) or vector(0)", "refId": "A" }]
+          "targets": [{ "expr": "round(sum(increase(payments_succeeded_total[$__range])) or vector(0))", "refId": "A" }]
         },
         {
           "id": 7,
@@ -109,7 +109,7 @@ data:
           "gridPos": { "h": 6, "w": 4, "x": 8, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
-          "targets": [{ "expr": "sum(increase(payments_failed_total[$__range])) or vector(0)", "refId": "A" }]
+          "targets": [{ "expr": "round(sum(increase(payments_failed_total[$__range])) or vector(0))", "refId": "A" }]
         },
         {
           "id": 8,
@@ -118,7 +118,7 @@ data:
           "gridPos": { "h": 6, "w": 4, "x": 12, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
-          "targets": [{ "expr": "sum(increase(orders_cooked_total[$__range])) or vector(0)", "refId": "A" }]
+          "targets": [{ "expr": "round(sum(increase(orders_cooked_total[$__range])) or vector(0))", "refId": "A" }]
         },
         {
           "id": 9,
@@ -127,7 +127,7 @@ data:
           "gridPos": { "h": 6, "w": 4, "x": 16, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
-          "targets": [{ "expr": "sum(increase(notifications_sent_total[$__range])) or vector(0)", "refId": "A" }]
+          "targets": [{ "expr": "round(sum(increase(notifications_sent_total[$__range])) or vector(0))", "refId": "A" }]
         },
         {
           "id": 10,
