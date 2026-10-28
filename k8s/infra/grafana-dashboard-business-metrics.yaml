@@ -24,7 +24,7 @@ data:
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "suffix: ops" }, "overrides": [] },
           "targets": [
             {
               "expr": "sum(rate(orders_placed_total[5m]))",
@@ -40,7 +40,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": {
-            "defaults": { "unit": "ops" },
+            "defaults": { "unit": "suffix: ops" },
             "overrides": [
               { "matcher": { "id": "byName", "options": "Succeeded" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
               { "matcher": { "id": "byName", "options": "Failed" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
@@ -58,7 +58,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": {
-            "defaults": { "unit": "ops" },
+            "defaults": { "unit": "suffix: ops" },
             "overrides": [
               { "matcher": { "id": "byName", "options": "Started cooking" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
               { "matcher": { "id": "byName", "options": "Cooked" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
@@ -75,7 +75,7 @@ data:
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "suffix: ops" }, "overrides": [] },
           "targets": [
             {
               "expr": "sum(rate(notifications_sent_total[5m]))",
