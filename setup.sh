@@ -24,7 +24,6 @@ KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-phaseolus}"
 RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-phaseolus}"
 GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-phaseolus}"
 ADMIN_UI_CLIENT_SECRET="${ADMIN_UI_CLIENT_SECRET:-phaseolus}"
-RABBITMQ_CLIENT_SECRET="${RABBITMQ_CLIENT_SECRET:-phaseolus}"
 
 META_REPO_URL="https://github.com/${GITHUB_USERNAME}/M321_TBZ_Phaseolus_Express.git"
 UPSTREAM_OWNER="Timposter8107"
@@ -113,13 +112,38 @@ helm repo add traefik https://traefik.github.io/charts >/dev/null
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
 helm repo update >/dev/null
 
+# SSO admin-uis plan Step 4: rabbitmq_auth_backend_oauth2 hard-requires https://
+# for auth_oauth2.issuer/jwks_uri (a schema validator, not a config flag), so
+# jwks_uri points at the Traefik TLS route in k8s/infra/keycloak-tls-route.yaml
+# (in-cluster, self-signed -- hence https.peer_verification=verify_none) while
+# issuer is the same route's browser-facing address, since it's only ever
+# string-compared against the token's iss claim, never fetched. The management
+# UI's own oauth_provider_url has no https requirement, but points at the same
+# TLS route anyway so the browser-obtained token's iss matches auth_oauth2.issuer.
+# auth_backends keeps "internal" first so every service's existing AMQP login is
+# untouched; oauth2 is additive, for the management UI's human login only.
+RABBITMQ_EXTRA_CONFIG="prometheus.return_per_object_metrics = true
+auth_backends.1 = internal
+auth_backends.2 = oauth2
+
+auth_oauth2.resource_server_id = rabbitmq
+auth_oauth2.issuer = https://localhost:9443/realms/phaseolus
+auth_oauth2.jwks_uri = https://traefik.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/certs
+auth_oauth2.https.peer_verification = verify_none
+
+management.oauth_enabled = true
+management.oauth_client_id = rabbitmq-client
+management.oauth_provider_url = https://localhost:9443/realms/phaseolus
+management.oauth_scopes = openid"
+
 helm upgrade --install rabbitmq bitnami/rabbitmq -n infra --version 16.0.14 \
   --set auth.username=phaseolus \
   --set auth.password="$RABBITMQ_PASSWORD" \
   --set global.security.allowInsecureImages=true \
   --set image.repository=bitnamilegacy/rabbitmq \
   --set volumePermissions.image.repository=bitnamilegacy/os-shell \
-  --set-string extraConfiguration="prometheus.return_per_object_metrics = true" \
+  --set-string extraConfiguration="$RABBITMQ_EXTRA_CONFIG" \
+  --set extraPlugins="rabbitmq_auth_backend_oauth2" \
   --set resourcesPreset=large
 
 helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
@@ -135,7 +159,13 @@ helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
   --set startupProbe.enabled=true \
   --set startupProbe.initialDelaySeconds=10 \
   --set startupProbe.periodSeconds=10 \
-  --set startupProbe.failureThreshold=30
+  --set startupProbe.failureThreshold=30 \
+  --set proxyHeaders=xforwarded
+  # proxyHeaders: trusts X-Forwarded-Proto so Keycloak reports https:// in its
+  # issuer/endpoints for requests via the TLS route in k8s/infra/keycloak-tls-route.yaml
+  # (SSO admin-uis plan Step 4, needed for RabbitMQ's oauth2 plugin). Inert for
+  # everything else -- direct plain-HTTP requests never send that header, so
+  # BeanApp/OrderBeans/BeanNotifs/Grafana's existing access is unaffected.
 
 helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1
 
@@ -350,23 +380,61 @@ curl -s -o /dev/null -w "admin-ui-client create: %{http_code}\n" \
     attributes: { "post.logout.redirect.uris": "+" }
   }')"
 
+# RabbitMQ's management-UI OAuth2 login runs entirely in the browser (PKCE, no
+# backend secret available), so rabbitmq-client is public, unlike the other clients.
 curl -s -o /dev/null -w "rabbitmq-client create: %{http_code}\n" \
   -X POST http://localhost:18081/admin/realms/phaseolus/clients \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d "$(jq -n --arg secret "$RABBITMQ_CLIENT_SECRET" '{
-    clientId: "rabbitmq-client",
-    protocol: "openid-connect",
-    publicClient: false,
-    serviceAccountsEnabled: false,
-    standardFlowEnabled: true,
-    directAccessGrantsEnabled: false,
-    authorizationServicesEnabled: false,
-    enabled: true,
-    secret: $secret,
-    redirectUris: ["http://localhost:15672/js/oidc-oauth/login-callback.html"],
-    webOrigins: ["+"],
-    attributes: { "post.logout.redirect.uris": "+" }
-  }')"
+  -d '{
+    "clientId": "rabbitmq-client",
+    "protocol": "openid-connect",
+    "publicClient": true,
+    "serviceAccountsEnabled": false,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "authorizationServicesEnabled": false,
+    "enabled": true,
+    "redirectUris": ["http://localhost:15672/js/oidc-oauth/login-callback.html"],
+    "webOrigins": ["+"],
+    "attributes": { "post.logout.redirect.uris": "+" }
+  }'
+
+# Step 4: RabbitMQ's oauth2 plugin reads permissions from the token's "scope" claim
+# as "<resource_server_id>.<permission>" strings (resource_server_id=rabbitmq, set
+# in the RabbitMQ Helm values below). A hardcoded-claim protocol mapper on "scope"
+# is silently ignored by Keycloak (it's a protected, scope-negotiation-derived
+# claim) -- real Keycloak client scopes, assigned as default, are what actually
+# populate it.
+RMQ_CLIENT_UUID=$(curl -s "http://localhost:18081/admin/realms/phaseolus/clients?clientId=rabbitmq-client" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+
+curl -s -o /dev/null -w "rabbitmq audience mapper: %{http_code}\n" \
+  -X POST "http://localhost:18081/admin/realms/phaseolus/clients/$RMQ_CLIENT_UUID/protocol-mappers/models" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "name": "rabbitmq-audience",
+    "protocol": "openid-connect",
+    "protocolMapper": "oidc-audience-mapper",
+    "config": {
+      "included.custom.audience": "rabbitmq",
+      "id.token.claim": "false",
+      "access.token.claim": "true"
+    }
+  }'
+
+for SCOPE_NAME in "rabbitmq.tag:administrator" "rabbitmq.read:*/*" "rabbitmq.write:*/*" "rabbitmq.configure:*/*"; do
+  curl -s -o /dev/null -w "rabbitmq scope '$SCOPE_NAME' create: %{http_code}\n" \
+    -X POST "http://localhost:18081/admin/realms/phaseolus/client-scopes" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg name "$SCOPE_NAME" '{name: $name, protocol: "openid-connect", attributes: {"include.in.token.scope": "true", "display.on.consent.screen": "false"}}')"
+done
+for SCOPE_NAME in "rabbitmq.tag:administrator" "rabbitmq.read:*/*" "rabbitmq.write:*/*" "rabbitmq.configure:*/*"; do
+  SCOPE_ID=$(curl -s "http://localhost:18081/admin/realms/phaseolus/client-scopes" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r --arg n "$SCOPE_NAME" '.[] | select(.name==$n) | .id')
+  curl -s -o /dev/null -w "rabbitmq scope '$SCOPE_NAME' assign: %{http_code}\n" \
+    -X PUT "http://localhost:18081/admin/realms/phaseolus/clients/$RMQ_CLIENT_UUID/default-client-scopes/$SCOPE_ID" \
+    -H "Authorization: Bearer $ADMIN_TOKEN"
+done
 
 # Longer-lived access tokens (default is 5 minutes) so a logged-in admin's
 # session doesn't expire mid-use; see SSO plan Q3.
@@ -433,6 +501,10 @@ start_port_forward rabbitmq   infra     rabbitmq 15672:15672
 start_port_forward keycloak   infra     keycloak 8180:80
 start_port_forward prometheus infra     prometheus-kube-prometheus-prometheus 9090:9090
 start_port_forward argocd     argocd    argocd-server 8443:443
+# Traefik's TLS-enabled entrypoint (k8s/infra/keycloak-tls-route.yaml) -- used only
+# for RabbitMQ's "Log in with SSO" button (SSO admin-uis plan Step 4). Everything
+# else keeps using the plain-HTTP keycloak port-forward above.
+start_port_forward keycloak-tls infra   traefik 9443:443
 sleep 3
 
 log "Done"
@@ -446,7 +518,7 @@ echo
 echo "Manual access (port-forwards running in the background -- PIDs in $PF_PID_FILE):"
 echo "  BeanApp             http://localhost:5050   (Admin page login: admin / phaseolus)"
 echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
-echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD"
+echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD (or 'Log in with SSO' via admin/phaseolus, through https://localhost:9443)"
 echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
 echo "  Prometheus          http://localhost:9090"
 echo "  Argo CD UI          https://localhost:8443   admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
