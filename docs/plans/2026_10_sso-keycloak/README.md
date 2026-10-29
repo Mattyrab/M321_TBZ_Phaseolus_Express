@@ -1,6 +1,6 @@
 # SSO via Keycloak
 
-⏳ **Status:** implementation plan drafted (5 steps), not yet executed. Direction: forward the admin's own token to BeanNotifs. Bring all five Phaseolus services under proper Keycloak-backed single sign-on, building on the admin login already working in BeanApp.
+⚠️ **Status:** all 5 steps done and verified live against a genuinely fresh cluster. One PR still open: [Timposter8107/M321_TBZ_Phaseolus_Notifs#6](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Notifs/pull/6), a real bug (wrong token-issuer validation) that Step 5's fresh-cluster test uncovered and fixed. Everything else from this plan is merged.
 
 ## Why this exists
 
@@ -13,7 +13,7 @@ The user wants "proper SSO for all services using Keycloak with the established 
 - ✅ [`10_target_shape.md`](./10_target_shape.md) — what the change must produce
 - ✅ [`20_options.md`](./20_options.md) — design options with pros/cons
 - ✅ [`30_open_questions.md`](./30_open_questions.md) — decisions that block implementation (3 questions, all resolved)
-- ⏳ [`40_implementation.md`](./40_implementation.md) — 5-step plan: Keycloak audience/lifespan + `setup.sh` fix, OrderBeans tightening, BeanNotifs auth, BeanApp token-forwarding, end-to-end verification
+- ⚠️ [`40_implementation.md`](./40_implementation.md) — 5-step plan, all done and verified; Step 5's fresh-cluster test found and fixed two real bugs (a `setup.sh` Keycloak liveness-probe issue, and a BeanNotifs token-issuer validation bug) — the latter's PR is still open
 - ⏳ [`50_followups.md`](./50_followups.md) — out-of-scope items parked for later
 
 ## Status legend
