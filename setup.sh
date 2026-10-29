@@ -139,7 +139,34 @@ helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
 
 helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1
 
+# SSO admin-uis plan Step 2: Grafana's generic_oauth has separate auth_url
+# (browser-facing, via the keycloak port-forward) vs token_url/api_url
+# (in-cluster DNS, reached by Grafana's own backend) -- same Authority vs
+# PublicAuthority split the sso-keycloak plan hit for BeanApp/BeanNotifs, but
+# Grafana supports it natively as distinct config keys. Per Q4, no
+# role_attribute_path restriction: any successful Keycloak login is admitted.
+# client_secret is passed via $__env{} + a plain env var, not inlined in
+# grafana.ini, because the chart's assertNoLeakedSecrets check refuses to
+# template a literal secret value into grafana.ini directly.
+cat > /tmp/phaseolus-grafana-oauth-values.yaml <<EOF
+grafana:
+  env:
+    GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: "$ADMIN_UI_CLIENT_SECRET"
+  grafana.ini:
+    auth.generic_oauth:
+      enabled: true
+      name: Keycloak
+      client_id: admin-ui-client
+      client_secret: \$__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+      scopes: openid email profile
+      auth_url: http://localhost:8180/realms/phaseolus/protocol/openid-connect/auth
+      token_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/token
+      api_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/userinfo
+      allow_sign_up: true
+EOF
+
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n infra --version 91.8.2 \
+  -f /tmp/phaseolus-grafana-oauth-values.yaml \
   --set grafana.adminPassword="$GRAFANA_PASSWORD"
 
 log "Waiting for RabbitMQ and Keycloak to be ready"
