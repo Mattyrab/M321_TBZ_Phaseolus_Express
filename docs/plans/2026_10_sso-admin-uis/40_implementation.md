@@ -10,7 +10,9 @@ Keycloak comes first (Step 1) since every other step needs its clients to exist 
 
 Unlike `../2026_10_sso-keycloak/`, **no C# code changes are involved anywhere in this plan** — every step is Keycloak admin-API config, Helm values, or Kubernetes manifests.
 
-**Cross-cutting technical note, called out once rather than per step:** Grafana's, Argo CD's, and RabbitMQ's OIDC/OAuth2 integrations all have a backend half (token exchange, JWKS fetch, OIDC discovery) that must reach Keycloak via the in-cluster DNS name, and a browser half (the actual login redirect) that must reach Keycloak via the dev-machine-reachable port-forward address (`http://localhost:8180/...`) — the exact same split `../2026_10_sso-keycloak/` hit (and fixed) twice for BeanApp and BeanNotifs. Grafana's `generic_oauth` config has explicit, separate `auth_url`/`token_url`/`api_url` keys built for exactly this. Argo CD's and RabbitMQ's exact support for the same split is **not yet confirmed** and is called out as a verification risk in Steps 3 and 4 rather than assumed solved here.
+**Cross-cutting technical note, called out once rather than per step:** Grafana's, Argo CD's, and RabbitMQ's OIDC/OAuth2 integrations all have a backend half (token exchange, JWKS fetch, OIDC discovery) that must reach Keycloak via the in-cluster DNS name, and a browser half (the actual login redirect) that must reach Keycloak via the dev-machine-reachable port-forward address (`http://localhost:8180/...`) — the exact same split `../2026_10_sso-keycloak/` hit (and fixed) twice for BeanApp and BeanNotifs. Grafana's `generic_oauth` config has explicit, separate `auth_url`/`token_url`/`api_url` keys built for exactly this. Argo CD's and RabbitMQ's exact support for the same split was **not yet confirmed when written** — Step 3 found live that Argo CD has no such split (neither its native `oidc.config` nor its Dex connector), and could not be made to work without an out-of-cluster DNS change the user chose not to make; see Step 3 for the full finding. RabbitMQ's support is still to be confirmed in Step 4.
+
+**Update after Step 3:** Argo CD Keycloak SSO is **not implemented** — see Step 3's notes. Three of the four tools named in `inputs.md` (Grafana, RabbitMQ, Prometheus) remain in scope; Argo CD keeps its local admin login. This is a real, accepted narrowing of scope, not a silent drop — recorded here, in Step 3, and in `50_followups.md`.
 
 ## Steps
 
@@ -35,11 +37,18 @@ Unlike `../2026_10_sso-keycloak/`, **no C# code changes are involved anywhere in
 
 ### Step 3 — Argo CD: `oidc.config` + RBAC
 
-⏳ **Do.** Patch `argocd-cm` with `url` (the browser-facing Argo CD address) and `oidc.config` (`issuer`, `clientID: admin-ui-client`, `clientSecret`, `requestedScopes: [openid, profile, email]`). Patch `argocd-rbac-cm` with a policy mapping the admin's email claim directly to `role:admin` (Q2) — e.g. `g, admin@phaseolus.local, role:admin`. Apply both via a new manifest under `k8s/argocd/` (or a `kubectl patch` in `setup.sh`, whichever proves more reliably idempotent on a re-run) rather than editing the live ConfigMaps only.
+⚠️ **Not implemented — blocked on a real architecture limit, found and accepted live.** Argo CD has no way to split the browser-facing Keycloak address from the in-cluster one its own backend needs, unlike Grafana's explicit `auth_url`/`token_url` keys.
 
-**Verify.** An anonymous visit to the Argo CD UI offers "Log in via Keycloak"; completing login as `admin` lands back in Argo CD with full access (Applications visible, sync-able). The local `admin` account (`argocd-initial-admin-secret`) still works as a fallback login — confirms the non-goal from `../2026_10_sso-keycloak/10_target_shape.md` (don't remove local admin fallbacks) holds here too.
+**What was tried.**
+- **Native `oidc.config`** with `issuer` set to the in-cluster DNS address (`http://keycloak.infra.svc.cluster.local/realms/phaseolus`): backend discovery succeeds, but Argo CD reuses that *same* discovered `authorization_endpoint` for the browser redirect — an anonymous login attempt redirects the browser straight to the in-cluster address, which it cannot resolve.
+- **Native `oidc.config`** with `issuer` set to the browser-facing address (`http://localhost:8180/realms/phaseolus`) instead: the browser redirect would be correct, but Argo CD's own backend discovery fails outright — confirmed live: `failed to query provider ...: dial tcp [::1]:8180: connect: connection refused` (`localhost` inside the `argocd-server` pod means the pod itself, not the dev machine).
+- **`dex.config`** with an `oidc`-type Keycloak connector, expecting Dex to broker the login so the browser only ever talks to Argo CD's own `/api/dex/...` endpoints: confirmed live that Dex's `oidc` connector type is a thin redirect wrapper, not a login-form proxy — it performs its own discovery against whichever `issuer` it's given and sends the browser's *second* hop straight there. Pointed at the in-cluster address, the browser again lands on `http://keycloak.infra.svc.cluster.local/...` and fails identically to the native path.
 
-**Known risk to resolve live, not assumed here:** whether Argo CD's native `oidc.config` supports the same backend/browser address split Grafana's config does, or whether `issuer` has to be one single value — if the latter, this step needs a concrete workaround (possibly accepting Argo CD's backend reaches Keycloak via the browser-facing address too, which only works if that address is *also* reachable from inside the `argocd-server` pod — not true today). Document whatever is actually found here.
+**Why no further workaround was pursued.** The only real fix is making one hostname resolve differently from inside the cluster (to Keycloak's ClusterIP) than from the dev machine (to the `kubectl port-forward` on `127.0.0.1`) — a hosts-file entry on the Windows host paired with a matching in-cluster DNS override (`hostAliases` on `argocd-server`/`argocd-dex-server`, or a CoreDNS rewrite). Presented to the user as a real choice (since it needs an admin-elevated edit outside this session's reach); the user chose to accept the limitation rather than make that edit.
+
+**Resolution.** Argo CD keeps its local `admin` account (`argocd-initial-admin-secret`) as its only login method. All live-tested config (`argocd-cm`'s `url`/`oidc.config`/`dex.config`, `argocd-rbac-cm`'s policy, `argocd-secret`'s `oidc.keycloak.clientSecret`, and `admin-ui-client`'s now-unused Argo CD redirect URIs) was reverted from the live cluster. `admin-ui-client` (Step 1) is now Grafana-only in practice; its `redirectUris` in `setup.sh` was trimmed back to just Grafana's callback. Filed in `50_followups.md` for anyone willing to make the hosts-file edit later.
+
+**Original plan (kept for reference, not executed):** patch `argocd-cm` with `url` + `oidc.config` (`issuer`, `clientID: admin-ui-client`, `clientSecret`, `requestedScopes: [openid, profile, email]`), and `argocd-rbac-cm` with `g, admin@phaseolus.local, role:admin` (Q2).
 
 ---
 
@@ -64,7 +73,8 @@ Unlike `../2026_10_sso-keycloak/`, **no C# code changes are involved anywhere in
 ⏳ **Do.** No code change — the same kind of full regression + new-behavior pass `../2026_10_sso-keycloak/`'s Step 5 ran, culminating in `minikube delete` + a full `setup.sh` re-run from the merged state of every step above.
 
 **Verify.**
-- All four tools: anonymous → Keycloak redirect → login as `admin` → authenticated in that tool, on a freshly built cluster with no manual follow-up.
+- Grafana and RabbitMQ (and Prometheus, via its gate): anonymous → Keycloak redirect → login as `admin` → authenticated in that tool, on a freshly built cluster with no manual follow-up.
+- Argo CD: confirm it still only offers local `admin` login (no stray "Log in via Keycloak" option left over from Step 3's live testing) — the explicit regression check for Step 3's revert actually having stuck through a fresh `setup.sh` run.
 - RabbitMQ AMQP flow: a real order still completes end-to-end.
 - Argo CD: all five service Applications still show `Synced`/`Healthy`.
 - Grafana: all three existing dashboards still render real data.

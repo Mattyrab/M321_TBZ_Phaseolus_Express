@@ -1,6 +1,6 @@
 # SSO for Admin UIs
 
-⏳ **Status:** all open questions resolved. Direction: native per-tool integration, dedicated gate only for Prometheus. Bring Grafana, RabbitMQ, Prometheus, and Argo CD's web UIs under the same Keycloak-backed SSO as the application services.
+⏳ **Status:** executing `40_implementation.md`. Steps 1–2 done (Keycloak clients, Grafana). Step 3 (Argo CD) found a real architecture limit live — Argo CD can't split the browser-facing/in-cluster Keycloak addresses the way Grafana can — and the user chose to accept that limitation rather than make the Windows hosts-file edit the only fix needs; Argo CD keeps its local admin login (see `40_implementation.md` Step 3, `50_followups.md`). Steps 4–6 (RabbitMQ, Prometheus, fresh-cluster verification) remain. Scope is now Grafana + RabbitMQ + Prometheus for working Keycloak SSO, with Argo CD covered by investigation + a documented, parked follow-up.
 
 ## Why this exists
 

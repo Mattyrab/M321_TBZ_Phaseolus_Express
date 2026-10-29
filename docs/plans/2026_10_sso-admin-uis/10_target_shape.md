@@ -31,6 +31,8 @@ What the change must produce. **Requirements, not solutions.** This is the inter
 
 ## Success criteria
 
+> **Amended after `40_implementation.md` Step 3:** Argo CD turned out to have no way to meet the first bullet below — it has no mechanism to split the browser-facing Keycloak address from the in-cluster one its own backend needs (unlike Grafana's `generic_oauth`), and the real fix (a Windows hosts-file entry + matching in-cluster DNS override) was declined. Argo CD keeps its local admin login; see Step 3 and `50_followups.md`. Left as originally written below for the record.
+
 - An anonymous request to each of Grafana, RabbitMQ's management UI, and Argo CD's UI is redirected into a real Keycloak login page (not shown that tool's own local login form); authenticating as `admin`/`phaseolus` lands back in that tool, logged in.
 - An anonymous request to Prometheus's UI is similarly gated — redirected to Keycloak login, only reachable after authenticating as `admin`.
 - A user who is *not* the `admin` (or lacks the `admin` role) is not able to complete login to any of the four tools — demonstrated live, the same way the prior plan demonstrated a non-admin token being rejected by BeanNotifs.

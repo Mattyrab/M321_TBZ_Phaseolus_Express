@@ -6,7 +6,7 @@ This file exists so the conversation doesn't bloat the current plan. When someth
 
 ## Out of scope, parked for later
 
-- ⏳ <Item>. <One sentence on what and why-it-was-deferred. Link a file path or related plan if it'll need follow-up work.>
+- ⏳ **Argo CD Keycloak SSO.** Blocked on a real split-horizon DNS problem: Argo CD (neither its native `oidc.config` nor its Dex `oidc` connector) has no way to use the in-cluster Keycloak address for its own backend while using the browser-facing `localhost:8180` address for the login redirect — both live-tested and confirmed broken in `40_implementation.md` Step 3. The only real fix found is a Windows hosts-file entry (e.g. `127.0.0.1 keycloak.phaseolus.local`, needing admin elevation) paired with a matching in-cluster DNS override (`hostAliases` on `argocd-server`/`argocd-dex-server`, or a CoreDNS rewrite) so one hostname resolves two different ways. Revisit if/when a real ingress hostname exists for Keycloak (also flagged in `../2026_10_sso-keycloak/50_followups.md`), since a real DNS name removes the whole problem. Until then, Argo CD's local `admin` account is its only login.
 
 ---
 
