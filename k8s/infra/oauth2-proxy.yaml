@@ -1,0 +1,84 @@
+# SSO admin-uis plan Step 5: Prometheus has no native auth of any kind, so it gets
+# a dedicated gate instead (Q3) -- oauth2-proxy reverse-proxies to Prometheus
+# (--upstream, prometheus-gate.yaml routes straight to it), redirecting an
+# unauthenticated request to Keycloak and admitting any successful login (same
+# "any authenticated user" posture as Grafana, Q4 -- there's only one Keycloak
+# user today). Reuses admin-ui-client (Q1); its
+# own backend calls (token exchange, JWKS) go to Keycloak's in-cluster DNS address,
+# while --oidc-issuer-url is only ever string-compared against the token's iss
+# claim, so it's the browser-facing address instead -- --skip-oidc-discovery
+# avoids the single-fetch problem that blocked Argo CD (Step 3).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oauth2-proxy
+  namespace: infra
+type: Opaque
+stringData:
+  client-secret: "phaseolus"
+  cookie-secret: "44d2a1973f342668e9dbdb047b9e98c3"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oauth2-proxy
+    spec:
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+          args:
+            - --provider=oidc
+            - --client-id=admin-ui-client
+            - --client-secret=$(CLIENT_SECRET)
+            - --cookie-secret=$(COOKIE_SECRET)
+            - --redirect-url=http://localhost:9091/oauth2/callback
+            - --oidc-issuer-url=http://localhost:8180/realms/phaseolus
+            - --skip-oidc-discovery=true
+            - --login-url=http://localhost:8180/realms/phaseolus/protocol/openid-connect/auth
+            - --redeem-url=http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/token
+            - --oidc-jwks-url=http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/certs
+            - --email-domain=*
+            - --skip-provider-button=true
+            - --cookie-secure=false
+            - --upstream=http://prometheus-kube-prometheus-prometheus.infra.svc.cluster.local:9090
+            - --http-address=0.0.0.0:4180
+            - --reverse-proxy=true
+          env:
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy
+                  key: client-secret
+            - name: COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy
+                  key: cookie-secret
+          ports:
+            - name: http
+              containerPort: 4180
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: infra
+spec:
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

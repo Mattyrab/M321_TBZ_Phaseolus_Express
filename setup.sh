@@ -167,7 +167,15 @@ helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
   # everything else -- direct plain-HTTP requests never send that header, so
   # BeanApp/OrderBeans/BeanNotifs/Grafana's existing access is unaffected.
 
-helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1
+# promgate: a dedicated entrypoint for Prometheus's oauth2-proxy gate (SSO
+# admin-uis plan Step 5, k8s/infra/prometheus-gate.yaml) -- not shared with any
+# other route, so no path-prefix disambiguation is needed against BeanApp's or
+# Keycloak's existing routes.
+helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1 \
+  --set ports.promgate.port=9091 \
+  --set ports.promgate.expose.default=true \
+  --set ports.promgate.exposedPort=9091 \
+  --set ports.promgate.protocol=TCP
 
 # SSO admin-uis plan Step 2: Grafana's generic_oauth has separate auth_url
 # (browser-facing, via the keycloak port-forward) vs token_url/api_url
@@ -350,7 +358,8 @@ curl -s -o /dev/null -w "audience mapper create: %{http_code}\n" \
   }'
 
 # SSO admin-uis plan Step 1: a client for Grafana's native OIDC login
-# (docs/plans/2026_10_sso-admin-uis/30_open_questions.md Q1), and a dedicated
+# (docs/plans/2026_10_sso-admin-uis/30_open_questions.md Q1) -- Step 5 also
+# reuses this client for Prometheus's oauth2-proxy gate -- and a dedicated
 # client for RabbitMQ's OAuth2 management-UI plugin (configured in a later
 # step -- this just registers the client).
 #
@@ -375,7 +384,7 @@ curl -s -o /dev/null -w "admin-ui-client create: %{http_code}\n" \
     authorizationServicesEnabled: false,
     enabled: true,
     secret: $secret,
-    redirectUris: ["http://localhost:3000/login/generic_oauth"],
+    redirectUris: ["http://localhost:3000/login/generic_oauth", "http://localhost:9091/oauth2/callback"],
     webOrigins: ["+"],
     attributes: { "post.logout.redirect.uris": "+" }
   }')"
@@ -499,7 +508,10 @@ start_port_forward beanapp    phaseolus beanapp 5050:8080
 start_port_forward grafana    infra     prometheus-grafana 3000:80
 start_port_forward rabbitmq   infra     rabbitmq 15672:15672
 start_port_forward keycloak   infra     keycloak 8180:80
-start_port_forward prometheus infra     prometheus-kube-prometheus-prometheus 9090:9090
+# Replaces a direct Service port-forward: that would bypass the oauth2-proxy
+# gate entirely (SSO admin-uis plan Step 5). Reach Prometheus only via Traefik's
+# promgate entrypoint now.
+start_port_forward prometheus-gate infra traefik 9091:9091
 start_port_forward argocd     argocd    argocd-server 8443:443
 # Traefik's TLS-enabled entrypoint (k8s/infra/keycloak-tls-route.yaml) -- used only
 # for RabbitMQ's "Log in with SSO" button (SSO admin-uis plan Step 4). Everything
@@ -520,7 +532,7 @@ echo "  BeanApp             http://localhost:5050   (Admin page login: admin / p
 echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
 echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD (or 'Log in with SSO' via admin/phaseolus, through https://localhost:9443)"
 echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
-echo "  Prometheus          http://localhost:9090"
+echo "  Prometheus          http://localhost:9091   (Keycloak login: admin / phaseolus)"
 echo "  Argo CD UI          https://localhost:8443   admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
 echo
 echo "To stop the port-forwards later:"
