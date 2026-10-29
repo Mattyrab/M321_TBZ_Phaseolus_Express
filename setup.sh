@@ -236,6 +236,9 @@ curl -s -o /dev/null -w "admin user create: %{http_code}\n" \
     "username": "admin",
     "enabled": true,
     "emailVerified": true,
+    "email": "admin@phaseolus.local",
+    "firstName": "Phaseolus",
+    "lastName": "Admin",
     "credentials": [{"type": "password", "value": "phaseolus", "temporary": false}]
   }'
 
@@ -248,6 +251,50 @@ curl -s -o /dev/null -w "admin role assign: %{http_code}\n" \
   -X POST "http://localhost:18081/admin/realms/phaseolus/users/$ADMIN_USER_ID/role-mappings/realm" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d "[$ADMIN_ROLE]"
+
+# By default Keycloak only puts realm_access.roles on the access token, not the ID
+# token -- BeanApp's OIDC login reads roles off the ID token, so without this fix
+# the admin role never shows up there and [Authorize(Roles = "admin")] always fails.
+ROLES_SCOPE_ID=$(curl -s http://localhost:18081/admin/realms/phaseolus/client-scopes \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[] | select(.name=="roles") | .id')
+REALM_ROLES_MAPPER=$(curl -s "http://localhost:18081/admin/realms/phaseolus/client-scopes/$ROLES_SCOPE_ID/protocol-mappers/models" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -c '.[] | select(.name=="realm roles")')
+REALM_ROLES_MAPPER_ID=$(echo "$REALM_ROLES_MAPPER" | jq -r '.id')
+echo "$REALM_ROLES_MAPPER" | jq '.config["id.token.claim"] = "true"' > /tmp/phaseolus-realm-roles-mapper.json
+curl -s -o /dev/null -w "realm-roles-in-id-token fix: %{http_code}\n" \
+  -X PUT "http://localhost:18081/admin/realms/phaseolus/client-scopes/$ROLES_SCOPE_ID/protocol-mappers/models/$REALM_ROLES_MAPPER_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d @/tmp/phaseolus-realm-roles-mapper.json
+
+# SSO plan Step 1: every token beanapp-client issues (interactive login or
+# client-credentials) carries a shared audience, so OrderBeans/BeanNotifs can
+# check "was this token meant for one of our services" instead of just "is it
+# signed by our realm."
+BEANAPP_CLIENT_UUID=$(curl -s "http://localhost:18081/admin/realms/phaseolus/clients?clientId=beanapp-client" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+curl -s -o /dev/null -w "audience mapper create: %{http_code}\n" \
+  -X POST "http://localhost:18081/admin/realms/phaseolus/clients/$BEANAPP_CLIENT_UUID/protocol-mappers/models" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "name": "phaseolus-internal-api-audience",
+    "protocol": "openid-connect",
+    "protocolMapper": "oidc-audience-mapper",
+    "config": {
+      "included.custom.audience": "phaseolus-internal-api",
+      "id.token.claim": "false",
+      "access.token.claim": "true"
+    }
+  }'
+
+# Longer-lived access tokens (default is 5 minutes) so a logged-in admin's
+# session doesn't expire mid-use; see SSO plan Q3.
+curl -s "http://localhost:18081/admin/realms/phaseolus" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  | jq '.accessTokenLifespan = 900' > /tmp/phaseolus-realm-patch.json
+curl -s -o /dev/null -w "realm access token lifespan: %{http_code}\n" \
+  -X PUT "http://localhost:18081/admin/realms/phaseolus" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d @/tmp/phaseolus-realm-patch.json
 
 kill $KC_PF_PID 2>/dev/null || true
 trap - EXIT
