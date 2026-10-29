@@ -56,12 +56,19 @@ Each step maps to one repo/PR, following the project's established branch-per-co
 
 ### Step 3 — BeanNotifs: require a valid, admin-scoped token
 
-⏳ **Do.**
+✅ **Do.**
 - Add `Keycloak:Authority` to `appsettings.json` and `deploy/deployment.yaml` (`Keycloak__Authority`), same in-cluster DNS value OrderBeans already uses — BeanNotifs has no `Keycloak` config section today.
 - Add the same `AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(...)` block OrderBeans has, plus: `ValidateAudience = true` / `ValidAudience = "phaseolus-internal-api"` (Step 1), `MapInboundClaims = false`, and an `OnTokenValidated` event that maps `realm_access.roles` onto `ClaimTypes.Role` — the same mapping logic already in BeanApp's OIDC setup (`WebApp/Program.cs`), adapted to `JwtBearerEvents`.
 - Change `app.MapGet("/notifications", ...)` to `.RequireAuthorization(policy => policy.RequireRole("admin"))` (needs `builder.Services.AddAuthorization()` too, which doesn't exist in this service yet).
 
 **Verify.** `curl` with no `Authorization` header → `401`. `curl` with BeanApp's client-credentials token (valid audience, but no `admin` role — service accounts don't carry realm roles) → `403`. `curl` with a freshly-fetched admin user token (`admin`/`phaseolus`, Resource Owner Password grant for this one manual test, or copied from an active browser session) → `200` with the same notification data the Admin page shows today. Confirm `/healthz/live`, `/healthz/ready`, and `/metrics` remain unauthenticated (non-goal from `10_target_shape.md` — must not regress).
+
+✅ **Done 2026-10-29 (locally, against port-forwarded RabbitMQ + Keycloak).** Tested via `dotnet run` rather than redeploying to the cluster -- `deploy/deployment.yaml` changed (new `Keycloak__Authority` env var), and applying that manually ahead of the PR merge would've raced against Argo CD's `selfHeal` reverting it (same class of issue hit testing BeanApp earlier). Running locally against the real port-forwarded RabbitMQ and Keycloak sidesteps that entirely.
+- No `Authorization` header → `401`.
+- BeanApp's client-credentials token (valid `phaseolus-internal-api` audience, no `admin` role) → `403`.
+- A real admin token (temporarily enabled direct-access-grants on `beanapp-client` for this one fetch, reverted immediately after) → `200` (empty array, since this was a fresh local instance with no accumulated notifications -- not a bug).
+- `/healthz/live` and `/metrics` confirmed still unauthenticated (`200`, no token).
+- No errors in the local run's logs (RabbitMQ consumer connected fine against the port-forward).
 
 ---
 
