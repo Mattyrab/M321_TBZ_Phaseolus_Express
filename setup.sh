@@ -129,7 +129,11 @@ helm upgrade --install keycloak bitnami/keycloak -n infra --version 25.2.0 \
   --set postgresql.image.repository=bitnamilegacy/postgresql \
   --set postgresql.volumePermissions.image.repository=bitnamilegacy/os-shell \
   --set postgresql.metrics.image.repository=bitnamilegacy/postgres-exporter \
-  --set resourcesPreset=large
+  --set resourcesPreset=large \
+  --set startupProbe.enabled=true \
+  --set startupProbe.initialDelaySeconds=10 \
+  --set startupProbe.periodSeconds=10 \
+  --set startupProbe.failureThreshold=30
 
 helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1
 

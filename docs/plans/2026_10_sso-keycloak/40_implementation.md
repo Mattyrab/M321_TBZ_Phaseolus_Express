@@ -37,6 +37,8 @@ Each step maps to one repo/PR, following the project's established branch-per-co
 - Cart → Checkout → OrderBeans still works unchanged (order accepted) — confirms the new audience claim doesn't disturb OrderBeans, which doesn't check it yet (that's Step 2).
 - Deferred to Step 5 rather than repeated here: the actual "tear down and re-run `setup.sh` against a fresh cluster" test. Doing a full teardown/rebuild now would only exercise the Keycloak piece in isolation, since Steps 2–4's code isn't written yet — running it once at Step 5, against the complete system, gets the same proof without rebuilding the cluster twice.
 
+**Amendment (found during Step 5):** that deferred fresh-cluster run uncovered a real `setup.sh` bug unrelated to the three changes above — the Keycloak Helm install's default `livenessProbe` (120s initial delay) is shorter than Keycloak's actual cold-start time on this machine, so a genuinely fresh pod got killed and restarted mid-startup, which then corrupted the Postgres schema (a partially-applied Liquibase migration) and caused a real crash loop. Fixed by enabling the chart's `startupProbe` (which suppresses liveness/readiness until the app is actually up) with a generous tolerance. See Step 5's notes for the full story and recovery.
+
 ---
 
 ### Step 2 — OrderBeans: require the shared audience
@@ -89,15 +91,23 @@ Each step maps to one repo/PR, following the project's established branch-per-co
 
 ### Step 5 — End-to-end live verification
 
-⏳ **Do.** No code change — this step is the full regression + new-behavior pass across the live cluster, after Steps 1–4 are all deployed together (per the plan summary's sequencing note).
+✅ **Do.** Planned as "no code change, just a verification pass" — in practice this step found and fixed two real bugs that only a genuinely fresh cluster could expose. `minikube delete` + a full `setup.sh` re-run (with explicit user confirmation first, given the destructive teardown), building from each service's merged `main`.
 
-**Verify.**
-- Cart → Checkout → OrderBeans: unchanged, place a real order, confirm success.
-- Anonymous `curl` to BeanNotifs' `/notifications`: `401`.
-- BeanApp's client-credentials token (valid audience, no `admin` role) against BeanNotifs: `403`.
-- Logged-in admin's `/Admin` page: notifications load correctly, using the forwarded token.
-- Expired-token UX: temporarily set `accessTokenLifespan` to something very short (e.g. 10s) via the Admin API, log in fresh, wait it out, reload `/Admin`, confirm the "please log in again" message from Step 4 — then restore the realm to the 15-minute setting from Step 1.
-- A fresh `setup.sh` run (Step 1's verification) still reproduces all of the above from a clean cluster.
+**Verify / what actually happened, in order:**
+
+1. **`setup.sh` itself wasn't runnable from this dev machine as-is** — it assumes a Linux VM (`apt-get`/`sudo` for `jq`); this Windows/Git-Bash environment has neither. Installed a standalone `jq.exe` into a user-writable PATH directory (no `setup.sh` change needed — this is a dev-machine gap, not a script bug, since the script's own doc comment says "a new Linux system").
+2. **Keycloak crash-looped on the genuinely fresh pod** — see the amendment on Step 1 above. The chart's default `livenessProbe` (120s) was shorter than real cold-start time; kubelet killed it mid-Liquibase-migration, which left Postgres with a partially-applied schema change. The *next* start then failed for real (`column "description" ... already exists` — Liquibase trying to reapply a changeset its own tracking table didn't know had partially landed). Fixed by enabling the chart's `startupProbe` in `setup.sh` (suppresses liveness/readiness until the app is actually up, generous 310s tolerance) and wiping the corrupted Postgres PVC (safe — this was a from-scratch test cluster, not live data) so Keycloak could re-migrate cleanly. Re-ran `setup.sh` end to end afterward; the Keycloak section (realm/client/audience-mapper/role/token-lifespan, all the Step 1 pieces) now succeeds on the first try with no restarts.
+3. **With the fresh cluster fully up, the five scenarios below were run in order:**
+   - Cart → Checkout → OrderBeans: placed a real order, accepted (`202`).
+   - Anonymous `curl` to `/notifications`: `401`.
+   - BeanApp's client-credentials token (valid audience, no `admin` role): `403` — but only once fetched via the correct route (see bug below).
+   - Logged-in admin's `/Admin` page: **failed the first time** — showed "session expired" immediately after a brand-new login. Root cause and fix below.
+   - Expired-token UX: set `accessTokenLifespan` to 5s, logged in fresh, waited out Keycloak's real 5-minute clock-skew window (~6 minutes, not simulated), reloaded `/Admin` — "Your session has expired — please log in again" rendered correctly. Restored the realm to 900s afterward.
+4. **Real bug found: BeanNotifs validated the wrong issuer.** `/notifications` only ever receives the admin's own browser-login token (forwarded as-is by Step 4), and Keycloak stamps that token with whichever host the *browser* used (`PublicAuthority`) — not the in-cluster DNS name (`Authority`) BeanNotifs uses to reach Keycloak for discovery. Same class of bug as BeanApp's own original login-loop issue; same fix (pin `ValidIssuer` to `PublicAuthority`, keep `Authority` for discovery/connectivity). This didn't surface in Steps 3/4's local testing because both services shared one Keycloak address there, masking the exact mismatch the real deployed topology has. Fixed in a new PR ([Timposter8107/M321_TBZ_Phaseolus_Notifs#6](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Notifs/pull/6)); OrderBeans needed no equivalent fix since it only ever receives *backend*-minted tokens (same host for both discovery and token issuance).
+5. **Testing the fix required pausing Argo CD properly.** Patching just the `beannotifs` Application's `syncPolicy` wasn't enough — the root App-of-Apps reconciler restored it within about a minute (same behavior noted in the architecture plan's Step 13 incident). Paused `automated` sync on both `phaseolus-root` and `beannotifs` together, verified it held, applied the fix, confirmed it, then restored both to `{prune: true, selfHeal: true}` immediately after. No StatefulSets/PVCs were touched this time (unlike the Step 13 incident) — purely a stateless Deployment, low blast radius throughout.
+6. **After the fix, all five scenarios passed cleanly**, including a second, independent token-expiry wait (the ~6-minute one in point 3 above, run against the fixed deployment).
+
+**What this step validated about the methodology itself:** every prior step's local/isolated testing was honest about what it covered, and this step is exactly why `10_target_shape.md` asked for it — the gap between "works in a simplified local topology" and "works in the real deployed one" was real, not hypothetical.
 
 ## Rollback / blast radius
 
