@@ -55,7 +55,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
-              "expr": "rabbitmq_queue_messages_ready{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-failed|notifs.order-cooked\"}",
+              "expr": "rabbitmq_queue_messages_ready{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-succeeded|notifs.payment-failed|notifs.order-cooking-started|notifs.order-cooked\"}",
               "legendFormat": "{{queue}}",
               "refId": "A"
             }
@@ -69,7 +69,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
-              "expr": "sum by (queue) (rate(rabbitmq_queue_messages_published_total{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-failed|notifs.order-cooked\"}[5m]))",
+              "expr": "sum by (queue) (rate(rabbitmq_queue_messages_published_total{queue=~\"pay.incoming-orders|cooker.paid-orders|notifs.payment-succeeded|notifs.payment-failed|notifs.order-cooking-started|notifs.order-cooked\"}[5m]))",
               "legendFormat": "{{queue}}",
               "refId": "A"
             }
