@@ -23,6 +23,8 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-phaseolus}"
 RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-phaseolus}"
 GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-phaseolus}"
+ADMIN_UI_CLIENT_SECRET="${ADMIN_UI_CLIENT_SECRET:-phaseolus}"
+RABBITMQ_CLIENT_SECRET="${RABBITMQ_CLIENT_SECRET:-phaseolus}"
 
 META_REPO_URL="https://github.com/${GITHUB_USERNAME}/M321_TBZ_Phaseolus_Express.git"
 UPSTREAM_OWNER="Timposter8107"
@@ -289,6 +291,46 @@ curl -s -o /dev/null -w "audience mapper create: %{http_code}\n" \
       "access.token.claim": "true"
     }
   }'
+
+# SSO admin-uis plan Step 1: a shared client for Grafana + Argo CD's own
+# native OIDC logins (docs/plans/2026_10_sso-admin-uis/30_open_questions.md Q1),
+# and a dedicated client for RabbitMQ's OAuth2 management-UI plugin (configured
+# in a later step -- this just registers the client).
+curl -s -o /dev/null -w "admin-ui-client create: %{http_code}\n" \
+  -X POST http://localhost:18081/admin/realms/phaseolus/clients \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg secret "$ADMIN_UI_CLIENT_SECRET" '{
+    clientId: "admin-ui-client",
+    protocol: "openid-connect",
+    publicClient: false,
+    serviceAccountsEnabled: false,
+    standardFlowEnabled: true,
+    directAccessGrantsEnabled: false,
+    authorizationServicesEnabled: false,
+    enabled: true,
+    secret: $secret,
+    redirectUris: ["http://localhost:3000/login/generic_oauth", "https://localhost:8443/auth/callback"],
+    webOrigins: ["+"],
+    attributes: { "post.logout.redirect.uris": "+" }
+  }')"
+
+curl -s -o /dev/null -w "rabbitmq-client create: %{http_code}\n" \
+  -X POST http://localhost:18081/admin/realms/phaseolus/clients \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg secret "$RABBITMQ_CLIENT_SECRET" '{
+    clientId: "rabbitmq-client",
+    protocol: "openid-connect",
+    publicClient: false,
+    serviceAccountsEnabled: false,
+    standardFlowEnabled: true,
+    directAccessGrantsEnabled: false,
+    authorizationServicesEnabled: false,
+    enabled: true,
+    secret: $secret,
+    redirectUris: ["http://localhost:15672/js/oidc-oauth/login-callback.html"],
+    webOrigins: ["+"],
+    attributes: { "post.logout.redirect.uris": "+" }
+  }')"
 
 # Longer-lived access tokens (default is 5 minutes) so a logged-in admin's
 # session doesn't expire mid-use; see SSO plan Q3.
