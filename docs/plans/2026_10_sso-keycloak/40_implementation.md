@@ -74,12 +74,16 @@ Each step maps to one repo/PR, following the project's established branch-per-co
 
 ### Step 4 — BeanApp: forward the admin's token, handle expiry
 
-⏳ **Do.** In `Admin.cshtml.cs`'s `OnGetAsync`:
+✅ **Do.** In `Admin.cshtml.cs`'s `OnGetAsync`:
 - Retrieve the current request's access token via `HttpContext.GetTokenAsync("access_token")`.
 - Replace the plain `GetFromJsonAsync` call with an explicit `HttpRequestMessage` carrying `Authorization: Bearer {token}` (same pattern `Checkout.cshtml.cs` already uses for the OrderBeans call), targeting BeanNotifs.
 - On a `401` response specifically, set a distinct message — "Your session has expired — please log in again" — instead of falling into the existing generic `catch` (`10_target_shape.md`/Q2). Other failures (BeanNotifs unreachable, 5xx, etc.) keep the existing generic "Could not reach BeanNotifs" message.
 
 **Verify.** Log in as `admin`, load `/Admin` — notifications render exactly as before (now carrying a real bearer token BeanNotifs actually checks). Manually expire the session (wait out the lifespan, or use Step 5's temporary short-lifespan trick) and reload `/Admin` — confirm the new "please log in again" message appears instead of the generic error, and that logging in again restores normal behavior.
+
+✅ **Done 2026-10-29 (locally, BeanApp + BeanNotifs both via `dotnet run`, against port-forwarded Keycloak/RabbitMQ).** Ran both services together locally (same reasoning as Step 3 -- avoids racing Argo CD on `deploy/deployment.yaml` changes ahead of merge) so the real round trip could be observed:
+- Logged in as `admin`, loaded `/Admin` -- BeanNotifs' own request metrics confirmed exactly one `200` response to `/notifications`, i.e. the forwarded token was genuinely accepted, not a silently-swallowed failure.
+- Expiry case: Keycloak's default 5-minute `ClockSkew` tolerance meant a short-lived test token wasn't actually treated as expired within a reasonable wait, so this was verified precisely instead of waiting out a real 15-minute window -- temporarily set `accessTokenLifespan` to 5s and, in the **local test instance only**, `ClockSkew = TimeSpan.Zero` on BeanNotifs (never committed; discarded via `git checkout --` immediately after, confirmed clean against the Step 3 commit). With that, the stale token correctly produced a `401`, and `/Admin` showed "Your session has expired — please log in again" exactly as designed. Both the Keycloak lifespan and the BeanNotifs code were restored to their Step 1/3 state afterward.
 
 ---
 
