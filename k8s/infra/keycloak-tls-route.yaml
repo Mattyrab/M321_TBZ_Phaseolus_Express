@@ -1,0 +1,24 @@
+# RabbitMQ's OAuth2 plugin (rabbitmq_auth_backend_oauth2) hard-requires https:// for
+# auth_oauth2.issuer/jwks_uri -- a schema-level validator, not a config flag -- but
+# Keycloak itself only serves plain HTTP. This IngressRoute puts Traefik's existing
+# `websecure` entrypoint (already TLS-enabled, self-signed) in front of the existing
+# Keycloak Service, used only for RabbitMQ's SSO login (docs/plans/2026_10_sso-admin-uis/
+# 40_implementation.md Step 4). Every other integration (BeanApp, OrderBeans, BeanNotifs,
+# Grafana) keeps using Keycloak's plain-HTTP port-forward unchanged -- Keycloak's
+# `proxyHeaders=xforwarded` setting (see setup.sh) only changes its reported issuer/
+# endpoints for requests that actually arrive via this TLS route.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: keycloak-tls
+  namespace: infra
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: PathPrefix(`/`)
+      kind: Rule
+      services:
+        - name: keycloak
+          port: 80
+  tls: {}
