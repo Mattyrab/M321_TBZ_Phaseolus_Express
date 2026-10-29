@@ -95,15 +95,16 @@ Unlike `../2026_10_sso-keycloak/`, **no C# code changes are involved anywhere in
 
 ### Step 6 — End-to-end live verification (fresh cluster)
 
-⏳ **Do.** No code change — the same kind of full regression + new-behavior pass `../2026_10_sso-keycloak/`'s Step 5 ran, culminating in `minikube delete` + a full `setup.sh` re-run from the merged state of every step above.
+✅ **Done.** Clean on the first try — no bugs found, unlike `../2026_10_sso-keycloak/`'s Step 5 (which found two). `minikube delete` + a full `setup.sh` re-run completed with no manual follow-up: all 5 service pods `Running`, all 7 Argo CD Applications `Synced`/`Healthy`, all infra pods (Keycloak, RabbitMQ, Traefik, Prometheus stack, oauth2-proxy) `Running` within minutes.
 
-**Verify.**
-- Grafana and RabbitMQ (and Prometheus, via its gate): anonymous → Keycloak redirect → login as `admin` → authenticated in that tool, on a freshly built cluster with no manual follow-up.
-- Argo CD: confirm it still only offers local `admin` login (no stray "Log in via Keycloak" option left over from Step 3's live testing) — the explicit regression check for Step 3's revert actually having stuck through a fresh `setup.sh` run.
-- RabbitMQ AMQP flow: a real order still completes end-to-end.
-- Argo CD: all five service Applications still show `Synced`/`Healthy`.
-- Grafana: all three existing dashboards still render real data.
-- Prometheus: the access-gate question from Step 5 (does the old direct port-forward still bypass it?) is re-confirmed on the fresh cluster, since `setup.sh`'s own port-forward section is exactly what would reintroduce that bypass if Step 5 didn't address it.
+**Verified, all on the fresh cluster:**
+- **Grafana:** full simulated browser login via `/login/generic_oauth` → real session issued → `/api/user` shows `admin@phaseolus.local`, `authLabels: ["Generic OAuth"]`.
+- **RabbitMQ:** full simulated browser login via the Step 4 TLS route (`https://localhost:9443`) → token exchange → `/api/whoami` via the management API shows `tags: ["administrator"]`, `is_internal_user: false`.
+- **Prometheus:** full simulated browser login via the Step 5 `promgate` entrypoint (`http://localhost:9091`) → real `302` to Keycloak → session cookie issued → `/api/v1/query?query=up` returns live data for every service, including all five Phaseolus services at `up: 1`.
+- **Argo CD:** `argocd-cm`/`argocd-rbac-cm` confirmed empty of any Keycloak config (Step 3's revert held through a from-scratch run, not just the live-tested cluster) — local `admin` login only, as intended.
+- **Real order placed** through BeanApp's actual UI (Beans → Cart → Checkout) on the fresh cluster — `alert-success`, and RabbitMQ's message stats (`publish: 3, deliver_get: 4`) confirm the full order → pay → cook → notify chain ran over AMQP using the unchanged `phaseolus`/`phaseolus` internal backend.
+- **Grafana dashboards:** all three Phaseolus dashboards (business metrics, order flow, technical) present and reachable for the SSO-authenticated session.
+- **Prometheus gate:** confirmed the direct Service-level port-forward (`kubectl port-forward svc/prometheus-kube-prometheus-prometheus`) still reaches Prometheus without Keycloak — the honest, documented limitation from Step 5 (no `NetworkPolicy` enforces the gate; `setup.sh` just no longer *offers* that path) holds exactly as described, not a new bug.
 
 ## Rollback / blast radius
 
