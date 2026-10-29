@@ -319,10 +319,19 @@ curl -s -o /dev/null -w "audience mapper create: %{http_code}\n" \
     }
   }'
 
-# SSO admin-uis plan Step 1: a shared client for Grafana + Argo CD's own
-# native OIDC logins (docs/plans/2026_10_sso-admin-uis/30_open_questions.md Q1),
-# and a dedicated client for RabbitMQ's OAuth2 management-UI plugin (configured
-# in a later step -- this just registers the client).
+# SSO admin-uis plan Step 1: a client for Grafana's native OIDC login
+# (docs/plans/2026_10_sso-admin-uis/30_open_questions.md Q1), and a dedicated
+# client for RabbitMQ's OAuth2 management-UI plugin (configured in a later
+# step -- this just registers the client).
+#
+# Argo CD was originally meant to share this client too, but Step 3 found
+# Argo CD has no way to split the browser-facing Keycloak address from the
+# in-cluster one its own backend needs (unlike Grafana's explicit auth_url/
+# token_url split) -- both its native oidc.config and its Dex "oidc" connector
+# fetch discovery once and reuse it for the browser redirect, so whichever
+# address is configured breaks one side or the other. See
+# docs/plans/2026_10_sso-admin-uis/40_implementation.md Step 3 and
+# 50_followups.md for the finding; Argo CD keeps using its local admin login.
 curl -s -o /dev/null -w "admin-ui-client create: %{http_code}\n" \
   -X POST http://localhost:18081/admin/realms/phaseolus/clients \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
@@ -336,7 +345,7 @@ curl -s -o /dev/null -w "admin-ui-client create: %{http_code}\n" \
     authorizationServicesEnabled: false,
     enabled: true,
     secret: $secret,
-    redirectUris: ["http://localhost:3000/login/generic_oauth", "https://localhost:8443/auth/callback"],
+    redirectUris: ["http://localhost:3000/login/generic_oauth"],
     webOrigins: ["+"],
     attributes: { "post.logout.redirect.uris": "+" }
   }')"
