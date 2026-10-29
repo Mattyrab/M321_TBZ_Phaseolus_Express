@@ -1,0 +1,28 @@
+# SSO admin-uis plan Step 5. Traefik's new `promgate` entrypoint (setup.sh's
+# traefik Helm install) is dedicated to this gate -- not shared with any other
+# route, so no path-prefix disambiguation against BeanApp's or Keycloak's existing
+# routes is needed.
+#
+# oauth2-proxy runs as a real reverse proxy here (its --upstream points at
+# Prometheus, oauth2-proxy.yaml), not as a bare forward-auth check: Traefik's
+# ForwardAuth middleware paired with oauth2-proxy's lightweight /oauth2/auth
+# endpoint was tried first, but Traefik's `errors` middleware (needed to turn
+# /oauth2/auth's bare 401 into an actual redirect) keeps the original 401 status
+# code even while substituting the redirect page's content -- browsers don't
+# auto-follow a Location header on a 401, so the "redirect anonymous users to
+# Keycloak" requirement silently failed. oauth2-proxy's own reverse-proxy mode
+# redirects correctly out of the box and needs no Middleware resources at all.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prometheus-gate
+  namespace: infra
+spec:
+  entryPoints:
+    - promgate
+  routes:
+    - match: PathPrefix(`/`)
+      kind: Rule
+      services:
+        - name: oauth2-proxy
+          port: 80
