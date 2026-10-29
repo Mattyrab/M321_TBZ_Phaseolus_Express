@@ -41,9 +41,16 @@ Each step maps to one repo/PR, following the project's established branch-per-co
 
 ### Step 2 — OrderBeans: require the shared audience
 
-⏳ **Do.** In `Program.cs`'s `AddJwtBearer` setup, change `options.TokenValidationParameters.ValidateAudience = false` to `true` and set `options.TokenValidationParameters.ValidAudience = "phaseolus-internal-api"`.
+✅ **Do.** In `Program.cs`'s `AddJwtBearer` setup, change `options.TokenValidationParameters.ValidateAudience = false` to `true` and set `options.TokenValidationParameters.ValidAudience = "phaseolus-internal-api"`.
 
 **Verify.** The existing Cart → Checkout flow still works end-to-end (BeanApp's client-credentials token now carries the new audience from Step 1, so this should be a no-op in practice) — place a real order through BeanApp and confirm OrderBeans accepts it (`202`) same as before. Separately, confirm a token that does *not* carry the audience (e.g. one fetched directly from a different, ad-hoc test client, or simply the pre-Step-1 token shape if still cached) is rejected with `401`.
+
+✅ **Done 2026-10-29 (live, against the dev cluster).** Isolated the audience check from issuer/signature validation by temporarily deleting and restoring Step 1's audience mapper around two in-cluster-fetched tokens (via a throwaway `curlimages/curl` pod hitting Keycloak's in-cluster DNS directly, so the issuer matches what OrderBeans expects):
+- Correct issuer, **no** `phaseolus-internal-api` audience → `401`.
+- Correct issuer, **with** the audience → `202`.
+- No `Authorization` header at all → `401`.
+- A first attempt using tokens fetched through the Keycloak *admin* port-forward (`localhost:18081`) produced a false failure on the "good" token too — that token's issuer was `http://localhost:18081/realms/...`, not the in-cluster DNS name OrderBeans validates against, so it was never really testing the audience check. Caught by checking OrderBeans' behavior against both a known-good and known-bad case rather than assuming the first 401 meant success.
+- Confirmed the real path still works: placed an actual order through BeanApp's Cart → Checkout flow end-to-end, accepted normally.
 
 ---
 
