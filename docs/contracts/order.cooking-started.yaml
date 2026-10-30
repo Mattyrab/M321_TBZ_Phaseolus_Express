@@ -1,0 +1,63 @@
+asyncapi: 2.6.0
+info:
+  title: order.cooking-started
+  version: "1.0.0"
+  description: >
+    Published by CookerBeaners the moment it picks up a paid order, before the
+    per-item cook delay. Consumed by BeanNotifs (queue
+    `notifs.order-cooking-started`) to log a notification.
+
+servers:
+  phaseolus-rabbitmq:
+    url: rabbitmq.infra.svc.cluster.local:5672
+    protocol: amqp
+    description: The shared `phaseolus.events` topic exchange every service publishes to and binds queues against.
+
+channels:
+  order.cooking-started:
+    description: Routing key on the `phaseolus.events` topic exchange.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: phaseolus.events
+          type: topic
+    publish:
+      summary: An order's cooking has started.
+      message:
+        $ref: '#/components/messages/OrderCookingStarted'
+
+components:
+  messages:
+    OrderCookingStarted:
+      name: OrderCookingStarted
+      title: order.cooking-started
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EventEnvelope'
+
+  schemas:
+    EventEnvelope:
+      type: object
+      properties:
+        EventId:
+          type: string
+          format: uuid
+        EventType:
+          type: string
+          const: order.cooking-started
+        OccurredAt:
+          type: string
+          format: date-time
+        OrderId:
+          type: string
+          format: uuid
+        Payload:
+          $ref: '#/components/schemas/OrderCookingStartedPayload'
+      required: [EventId, EventType, OccurredAt, OrderId, Payload]
+
+    # Empty on purpose — OrderId on the envelope is all any consumer has ever
+    # needed (architecture plan Q5). No fields to add here.
+    OrderCookingStartedPayload:
+      type: object
+      properties: {}

@@ -1,0 +1,80 @@
+asyncapi: 2.6.0
+info:
+  title: payment.succeeded
+  version: "1.0.0"
+  description: >
+    Published by PayBeancoins after successfully charging an order (any item not
+    named "Rotten Beans", per the deterministic mock payment logic). Consumed by
+    CookerBeaners (queue `cooker.paid-orders`) to start cooking, and by BeanNotifs
+    (queue `notifs.payment-succeeded`) to log a notification.
+
+servers:
+  phaseolus-rabbitmq:
+    url: rabbitmq.infra.svc.cluster.local:5672
+    protocol: amqp
+    description: The shared `phaseolus.events` topic exchange every service publishes to and binds queues against.
+
+channels:
+  payment.succeeded:
+    description: Routing key on the `phaseolus.events` topic exchange.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: phaseolus.events
+          type: topic
+    publish:
+      summary: A payment was successfully charged.
+      message:
+        $ref: '#/components/messages/PaymentSucceeded'
+
+components:
+  messages:
+    PaymentSucceeded:
+      name: PaymentSucceeded
+      title: payment.succeeded
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EventEnvelope'
+
+  schemas:
+    EventEnvelope:
+      type: object
+      properties:
+        EventId:
+          type: string
+          format: uuid
+        EventType:
+          type: string
+          const: payment.succeeded
+        OccurredAt:
+          type: string
+          format: date-time
+        OrderId:
+          type: string
+          format: uuid
+        Payload:
+          $ref: '#/components/schemas/PaymentSucceededPayload'
+      required: [EventId, EventType, OccurredAt, OrderId, Payload]
+
+    PaymentSucceededPayload:
+      type: object
+      properties:
+        AmountCharged:
+          type: number
+          description: Decimal in the C# source; represented here as a JSON number.
+        Items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+          description: Carried through so CookerBeaners knows what to cook without re-querying OrderBeans.
+      required: [AmountCharged, Items]
+
+    OrderItem:
+      type: object
+      properties:
+        Name:
+          type: string
+        Quantity:
+          type: integer
+      required: [Name, Quantity]

@@ -1,0 +1,65 @@
+asyncapi: 2.6.0
+info:
+  title: payment.failed
+  version: "1.0.0"
+  description: >
+    Published by PayBeancoins when a payment fails (any item named "Rotten Beans",
+    case-insensitive, per the deterministic mock payment logic). Consumed by
+    BeanNotifs (queue `notifs.payment-failed`) to log a notification.
+
+servers:
+  phaseolus-rabbitmq:
+    url: rabbitmq.infra.svc.cluster.local:5672
+    protocol: amqp
+    description: The shared `phaseolus.events` topic exchange every service publishes to and binds queues against.
+
+channels:
+  payment.failed:
+    description: Routing key on the `phaseolus.events` topic exchange.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: phaseolus.events
+          type: topic
+    publish:
+      summary: A payment attempt failed.
+      message:
+        $ref: '#/components/messages/PaymentFailed'
+
+components:
+  messages:
+    PaymentFailed:
+      name: PaymentFailed
+      title: payment.failed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EventEnvelope'
+
+  schemas:
+    EventEnvelope:
+      type: object
+      properties:
+        EventId:
+          type: string
+          format: uuid
+        EventType:
+          type: string
+          const: payment.failed
+        OccurredAt:
+          type: string
+          format: date-time
+        OrderId:
+          type: string
+          format: uuid
+        Payload:
+          $ref: '#/components/schemas/PaymentFailedPayload'
+      required: [EventId, EventType, OccurredAt, OrderId, Payload]
+
+    PaymentFailedPayload:
+      type: object
+      properties:
+        Reason:
+          type: string
+          description: 'Human-readable failure reason, e.g. "Simulated failure: Rotten Beans".'
+      required: [Reason]

@@ -1,0 +1,96 @@
+asyncapi: 2.6.0
+info:
+  title: order.created
+  version: "1.0.0"
+  description: >
+    Published by OrderBeans (`POST /orders`) when a customer places a new order.
+    Consumed by PayBeancoins (queue `pay.incoming-orders`) to attempt payment.
+
+servers:
+  phaseolus-rabbitmq:
+    url: rabbitmq.infra.svc.cluster.local:5672
+    protocol: amqp
+    description: The shared `phaseolus.events` topic exchange every service publishes to and binds queues against.
+
+channels:
+  order.created:
+    description: Routing key on the `phaseolus.events` topic exchange.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: phaseolus.events
+          type: topic
+    publish:
+      summary: A new order was placed.
+      message:
+        $ref: '#/components/messages/OrderCreated'
+
+components:
+  messages:
+    OrderCreated:
+      name: OrderCreated
+      title: order.created
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EventEnvelope'
+
+  schemas:
+    # The envelope every event type shares. Copy-pasted identically into each
+    # service's own Messaging/EventEnvelope.cs — no shared package, per the
+    # architecture plan's Q2 and the service-api-template plan's Option B.
+    EventEnvelope:
+      type: object
+      properties:
+        EventId:
+          type: string
+          format: uuid
+        EventType:
+          type: string
+          const: order.created
+        OccurredAt:
+          type: string
+          format: date-time
+        OrderId:
+          type: string
+          format: uuid
+        Payload:
+          $ref: '#/components/schemas/OrderCreatedPayload'
+      required: [EventId, EventType, OccurredAt, OrderId, Payload]
+
+    OrderCreatedPayload:
+      type: object
+      properties:
+        Items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        TotalAmount:
+          type: number
+          description: Decimal in the C# source; represented here as a JSON number.
+        Email:
+          type: string
+          format: email
+          description: >
+            Present on the wire since this event type existed, but PayBeancoins'
+            own copy of this payload didn't declare it until the
+            message-contracts-hardening plan's Step 2 fix — see that plan's
+            00_current_state.md for the drift this spec now closes.
+        DeliveryNote:
+          type: string
+          nullable: true
+          description: >
+            Added in message-contracts-hardening plan Step 2 as a deliberate,
+            additive v1→v2 demo. Existing consumers that don't know about this
+            field (PayBeancoins at the time it was added) safely ignore it —
+            System.Text.Json's default lenient deserialization (Tolerant Reader).
+      required: [Items, TotalAmount, Email]
+
+    OrderItem:
+      type: object
+      properties:
+        Name:
+          type: string
+        Quantity:
+          type: integer
+      required: [Name, Quantity]
