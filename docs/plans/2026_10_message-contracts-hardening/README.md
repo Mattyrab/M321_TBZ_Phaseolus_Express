@@ -1,6 +1,6 @@
 # Message Contracts Hardening
 
-⏳ **Status:** all open questions resolved. Direction: AsyncAPI specs per event (docs only, no runtime enforcement); breaking-change demo via Tolerant Reader (`OrderBeans` adds a new optional `DeliveryNote` field, deployed alone); the pre-existing `Email` drift gets fixed as free cleanup alongside it; the `EventId`-dedup idempotency guard goes into all three consumers, not just one. Closes the three most heavily-weighted (15 pts each, 45 of 100 total) gaps the grading-rubric audit found.
+✅ **Status:** complete. All four steps done and live-verified, including a full `minikube delete` + fresh `setup.sh` run that came up clean on the first try. `EventId` idempotency guard in all three consumers; the pre-existing `Email` drift fixed; a genuine, deliberately-chosen breaking change (`OrderBeans`' new `DeliveryNote` field) deployed in isolation via Tolerant Reader, proven live in both directions (producer alone, then consumer alone); AsyncAPI specs for all five event types. Closes the three most heavily-weighted (15 pts each, 45 of 100 total) gaps the grading-rubric audit found. See `40_implementation.md` for the full step-by-step record and `50_followups.md` for what's parked.
 
 ## Why this exists
 
