@@ -1,0 +1,64 @@
+asyncapi: 2.6.0
+info:
+  title: order.cooked
+  version: "1.0.0"
+  description: >
+    Published by CookerBeaners once an order's per-item cook delay has elapsed
+    (see `CookTimes` — items cook in parallel, so the order's total time is its
+    slowest item, not the sum). Consumed by BeanNotifs (queue
+    `notifs.order-cooked`) to log a notification.
+
+servers:
+  phaseolus-rabbitmq:
+    url: rabbitmq.infra.svc.cluster.local:5672
+    protocol: amqp
+    description: The shared `phaseolus.events` topic exchange every service publishes to and binds queues against.
+
+channels:
+  order.cooked:
+    description: Routing key on the `phaseolus.events` topic exchange.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: phaseolus.events
+          type: topic
+    publish:
+      summary: An order has finished cooking.
+      message:
+        $ref: '#/components/messages/OrderCooked'
+
+components:
+  messages:
+    OrderCooked:
+      name: OrderCooked
+      title: order.cooked
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EventEnvelope'
+
+  schemas:
+    EventEnvelope:
+      type: object
+      properties:
+        EventId:
+          type: string
+          format: uuid
+        EventType:
+          type: string
+          const: order.cooked
+        OccurredAt:
+          type: string
+          format: date-time
+        OrderId:
+          type: string
+          format: uuid
+        Payload:
+          $ref: '#/components/schemas/OrderCookedPayload'
+      required: [EventId, EventType, OccurredAt, OrderId, Payload]
+
+    # Empty on purpose — OrderId on the envelope is all any consumer has ever
+    # needed (architecture plan Q5). No fields to add here.
+    OrderCookedPayload:
+      type: object
+      properties: {}
