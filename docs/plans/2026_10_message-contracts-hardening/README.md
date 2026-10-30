@@ -1,6 +1,6 @@
 # Message Contracts Hardening
 
-⏳ **Status:** scaffolded. Direction: TBD. Closes the three most heavily-weighted (15 pts each, 45 of 100 total) gaps the grading-rubric audit found: no formal message contracts, no idempotency strategy, and no demonstrated breaking-change handling — all three touching the same `EventEnvelope`/payload/versioning surface, so tackled together.
+⏳ **Status:** all open questions resolved. Direction: AsyncAPI specs per event (docs only, no runtime enforcement); breaking-change demo via Tolerant Reader (`OrderBeans` adds a new optional `DeliveryNote` field, deployed alone); the pre-existing `Email` drift gets fixed as free cleanup alongside it; the `EventId`-dedup idempotency guard goes into all three consumers, not just one. Closes the three most heavily-weighted (15 pts each, 45 of 100 total) gaps the grading-rubric audit found.
 
 ## Why this exists
 
@@ -9,11 +9,11 @@ A full audit against the project's grading rubric (`docs/LB3_Projektarbeit_WIR.m
 ## Index
 
 - 📎 [`inputs.md`](./inputs.md) — user's source framing (verbatim)
-- ⏳ [`00_current_state.md`](./00_current_state.md) — what exists in the codebase today
-- ⏳ [`10_target_shape.md`](./10_target_shape.md) — what the change must produce
-- ⏳ [`20_options.md`](./20_options.md) — design options with pros/cons
-- ⏳ [`30_open_questions.md`](./30_open_questions.md) — decisions that block implementation
-- ⏳ [`40_implementation.md`](./40_implementation.md) — step plan
+- ✅ [`00_current_state.md`](./00_current_state.md) — what exists in the codebase today
+- ✅ [`10_target_shape.md`](./10_target_shape.md) — what the change must produce
+- ✅ [`20_options.md`](./20_options.md) — design options with pros/cons
+- ✅ [`30_open_questions.md`](./30_open_questions.md) — decisions that block implementation (4 questions, all resolved)
+- ✅ [`40_implementation.md`](./40_implementation.md) — step plan
 - ⏳ [`50_followups.md`](./50_followups.md) — out-of-scope items parked for later
 
 ## Status legend
