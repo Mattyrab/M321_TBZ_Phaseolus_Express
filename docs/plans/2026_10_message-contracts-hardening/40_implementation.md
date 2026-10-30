@@ -8,52 +8,50 @@ Each step has a verification: how do we know the step is done? Strong verificati
 
 Four steps. **Step 1 (idempotency) is independent of everything else** and goes first — lowest risk, touches only the already-shared consumer plumbing, no payload/spec dependencies. **Step 2 (payload evolution) must come before Step 3 (AsyncAPI specs)** — the specs need to describe the *final* shape, not the pre-fix one. **Step 4 (live verification) is last**, after everything else is merged, and is itself the rehearsal for the rubric's live-demo checklist item.
 
-Step 2 is this plan's centerpiece: it both fixes the real `Email` drift `00_current_state.md` found (free, risk-free — `PayBeancoins` was always receiving `Email`, just not declaring it) *and* carries the genuine breaking-change demo (`OrderBeans` adds a new `DeliveryNote` field, deployed alone, proving to the rubric's Tolerant-Reader-sanctioned standard that existing, unmodified consumers keep working). These two changes are bundled in one step because they touch the same payload type, but they demonstrate two *different* halves of "isolated deployment" — a producer changing alone, and (separately, in Step 4's rehearsal) a consumer catching up alone — worth narrating as two distinct moments in the actual demo, not one.
+Step 2 is this plan's centerpiece: it both fixes the real `Email` drift `00_current_state.md` found (free, risk-free — `PayBeancoins` was always receiving `Email`, just not declaring it) *and* carries the genuine breaking-change demo (`OrderBeans` adds a new `DeliveryNote` field, deployed alone, proving to the rubric's Tolerant-Reader-sanctioned standard that existing, unmodified consumers keep working). These two changes are bundled in one step because they touch the same payload type, but they demonstrate two *different* halves of "isolated deployment" — a producer changing alone, and a consumer catching up alone — narrated as two distinct moments in the actual demo, not one.
+
+**Post-execution note:** the isolated-deploy proof originally planned for Step 4 ended up happening live during Step 2's own PR work instead, as each change was built — a stronger result than planned (proven as real as it gets, not just rehearsed afterward). Step 4 then re-verified idempotency and the full chain on the *final, fully-merged* state and added the fresh-cluster reproducibility run.
 
 ## Steps
 
 ### Step 1 — `EventId` idempotency guard in all three consumers
 
-⏳ **Do.** In each of `PayBeancoins`, `CookerBeaners`, `BeanNotifs`'s `Messaging/EventConsumerHostedService.cs` (identical copy-pasted plumbing in all three, per `00_current_state.md`), add an in-memory `HashSet<Guid>` (or `ConcurrentDictionary<Guid, byte>` if the consumer dispatch ever runs concurrently) of already-processed `EventId`s. In `HandleDeliveryAsync`, right after a message deserializes successfully and *before* calling `binding.Handler`: if `envelope.EventId` is already in the set, log it, `BasicAck` immediately, and return without invoking the handler — this is the "ignore duplicate messages" behavior the rubric names. On the handler's first successful completion, add the `EventId` to the set. No persistence, no eviction policy, no dead-letter exchange — per `10_target_shape.md`'s non-goals, an in-memory guard is sufficient at this project's demo scale.
+✅ **Done.** Added a `ConcurrentDictionary<Guid, byte>` of already-processed `EventId`s to `Messaging/EventConsumerHostedService.cs` in `PayBeancoins`, `CookerBeaners`, and `BeanNotifs` (identical copy-pasted plumbing, patched identically in each). Checked before invoking the handler; recorded only after it succeeds. PRs: [Pay #5](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Pay/pull/5), [Cooker #5](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Cooker/pull/5), [Notifs #7](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Notifs/pull/7).
 
-**Verify.** Unit-level: none needed (the change is small enough to verify live). Live: see Step 4's redelivery test.
+**Verified live** (not deferred to Step 4 as originally planned — proven immediately on each PR): captured a real message via a temporary queue binding, manually re-published it (same `EventId`) to the exchange, confirmed the receiving service's Prometheus counter did not move a second time and logs showed the duplicate being skipped. Done independently on `PayBeancoins` (`payments_succeeded_total`) and `BeanNotifs` (`notifications_sent_total`); `CookerBeaners` verified by code identity + clean build, given the byte-identical guard logic.
 
 ---
 
 ### Step 2 — Payload evolution: fix the `Email` drift, add `DeliveryNote`
 
-⏳ **Do.**
-- **The `Email` fix (closes the real drift):** `PayBeancoins/Models/PaymentModels.cs:6` — change `OrderCreatedPayload` from `(List<OrderItem> Items, decimal TotalAmount)` to `(List<OrderItem> Items, decimal TotalAmount, string Email)`, matching what `OrderBeans` already sends. No handler logic changes — `PayBeancoins` still doesn't *use* `Email`, it now just correctly declares what it receives.
-- **The `DeliveryNote` addition (the actual breaking-change demo):**
-  - `OrderBeans/Models/OrderModels.cs` — add `string? DeliveryNote` to both `CreateOrderRequest` and `OrderCreatedPayload`.
-  - `OrderBeans/Program.cs:41-57` (`POST /orders`) — pass `request.DeliveryNote` through into the constructed `OrderCreatedPayload`.
-  - `BeanApp/WebApp/WebApp/Models/OrderModels.cs:6` — add `string? DeliveryNote` to its own `CreateOrderRequest` copy.
-  - `BeanApp/WebApp/WebApp/Pages/Checkout.cshtml.cs` — add a `[BindProperty] public string? DeliveryNote { get; set; }`, pass it into the `CreateOrderRequest` constructed in `OnPostPayAsync` (`:60-63`).
-  - `BeanApp/WebApp/WebApp/Pages/Checkout.cshtml` — one optional textarea input bound to `DeliveryNote`, next to the existing email field.
-- **Deliberately not touched:** `PayBeancoins`, `CookerBeaners`, `BeanNotifs` do not need to know about `DeliveryNote` at all — that's the point. `CookerBeaners`/`BeanNotifs` don't even deserialize `order.created`'s payload (per `00_current_state.md`'s routing table), so they're doubly unaffected.
+✅ **Done.** PRs: [Pay #6](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Pay/pull/6) (`Email` fix), [Order #6](https://github.com/Timposter8107/M321_TBZ_Phaseolus_Order/pull/6) (`DeliveryNote`), [WebApp #10](https://github.com/Timposter8107/M321_TBZ_Phaseolus_WebApp/pull/10) (`DeliveryNote` UI). Exactly as planned — `Email` added to `PayBeancoins`' `OrderCreatedPayload`; `DeliveryNote` (optional) added to `OrderBeans`'/`BeanApp`'s records, wired through `Program.cs` and `Checkout.cshtml`/`.cs`. `CookerBeaners`/`BeanNotifs` untouched, as intended.
 
-**Verify.** `dotnet build` clean in `OrderBeans`, `PayBeancoins`, and `WebApp`. Live verification (the actual isolated-deploy proof) is Step 4 — this step is just the code change.
+**Verified live, the isolated-deploy proof (moved up from Step 4, done here instead):**
+- Deployed `OrderBeans`+`BeanApp` alone, `PayBeancoins` left on its pre-fix image. Placed a real order through BeanApp's actual checkout form with a delivery note. Captured the resulting message via a temporary queue binding — confirmed `DeliveryNote` present on the wire. Confirmed zero errors in `PayBeancoins`' logs and `payments_succeeded_total` incremented normally, proving the untouched consumer tolerates the new field.
+- Separately deployed `PayBeancoins`'s `Email` fix alone. Confirmed it started clean and continued processing a fresh real order correctly — the other half of "isolated deployment," a consumer updating independently of the producer.
 
 ---
 
 ### Step 3 — AsyncAPI specs for all five event types
 
-⏳ **Do.** Add `docs/contracts/` to this meta repo (the project's existing shared/meta repo, satisfying the rubric's "versioniert im Shared-Repo" wording) with one AsyncAPI document per event type: `order.created.yaml`, `payment.succeeded.yaml`, `payment.failed.yaml`, `order.cooking-started.yaml`, `order.cooked.yaml`. Each describes the shared envelope (`EventId`, `EventType`, `OccurredAt`, `OrderId`) plus that event's payload schema, matching the *final* shapes after Step 2 — `order.created`'s spec documents `Email` (now correctly consumed) and `DeliveryNote` (optional, added in Step 2) together, with a short note on `DeliveryNote` explaining it's an additive, Tolerant-Reader-safe field that existing consumers may ignore.
+✅ **Done.** [PR #23](https://github.com/Mattyrab/M321_TBZ_Phaseolus_Express/pull/23). Added `docs/contracts/` with one AsyncAPI 2.6.0 spec per event type plus a short README, matching the final post-Step-2 shapes (`order.created` documents both `Email` and `DeliveryNote` together).
 
-**Verify.** Each YAML file is valid AsyncAPI (a linter if one's easy to reach for, otherwise a careful manual read against the spec format) and matches the actual C# record shapes byte-for-byte — cross-check each spec's fields against the corresponding `Models/*.cs` file named in `00_current_state.md`.
+**Verified:** all five files pass `npx @asyncapi/cli validate` with 0 errors (only cosmetic governance warnings — missing optional `operationId`/`messageId`/`contact`/`license`/`tags`). Each schema cross-checked by hand against its corresponding C# record.
 
 ---
 
 ### Step 4 — Live verification (the demo rehearsal)
 
-⏳ **Do.** No code change — this step *is* the verification, run against the real cluster, and doubles as the rehearsal for the rubric's live-demo checklist item ("Demonstration einer API-Änderung... während abhängige Services ohne Ausfall weiterfunktionieren").
+✅ **Done.**
 
-**Verify.**
-- **Idempotency:** capture one real message (e.g. a `payment.succeeded` delivery) from the running system, then manually re-publish the identical message (same `EventId`) via a throwaway script/pod. Confirm the receiving consumer's Prometheus counter does not increment a second time and no duplicate downstream effect occurs (no second notification logged, no second `order.cooking-started` published) — the dedup guard from Step 1 must visibly skip it.
-- **Isolated producer deploy (the core demo):** with `PayBeancoins`/`CookerBeaners`/`BeanNotifs` still on their pre-Step-2 images, deploy only the new `OrderBeans` (+ `BeanApp`, so the UI field exists) image. Place a real order through BeanApp's checkout with a delivery note filled in. Confirm it completes end-to-end — payment, cooking, notification — with zero errors in any of the three untouched services' logs, proving they tolerate the new field without having been redeployed.
-- **Isolated consumer deploy (the other half):** separately, deploy the fixed `PayBeancoins` (with the `Email` field now declared) on its own. Confirm it starts cleanly and continues processing orders normally — demonstrating a consumer can also be updated independently, in either order relative to the producer.
-- **Regression — the baseline flow still works:** place one more real order with the delivery-note field left blank (confirms `DeliveryNote`'s optionality didn't break the existing path) and confirm the full order → pay → cook → notify chain completes exactly as it did before this plan, matching the regression bar every prior plan in this repo has held to.
-- **Fresh-cluster reproducibility:** run `setup.sh` against a freshly deleted `minikube` cluster and confirm the system comes up with all of the above already true — same bar `../2026_10_sso-keycloak/`'s Step 5 and `../2026_10_sso-admin-uis/`'s Step 6 established.
+**Isolated producer/consumer deploys were actually proven during Step 2's own PRs, live, as they were built** — not deferred to this step as originally planned: `OrderBeans`+`BeanApp` were deployed alone (with `PayBeancoins` left on its pre-Step-2 image) and a real order with a delivery note was placed and completed end-to-end with zero errors in the untouched service; then `PayBeancoins`'s `Email` fix was deployed on its own and confirmed to start clean and keep processing orders. See Step 2's "Done" notes and its PRs' test plans for that evidence. Step 4 re-confirmed both fields working *together* on the fully-merged state (see below) rather than re-staging the isolation a second time.
+
+**What Step 4 itself verified, against the fully-merged system:**
+- **Idempotency on the final state:** placed a real order (`OrderBeans` directly), captured the resulting `order.created` message (now carrying both `Email` and `DeliveryNote`) via a temporary queue binding, manually re-published the identical payload (same `EventId`) to the exchange. `payments_succeeded_total` did not move a second time; logs showed `"Duplicate delivery... already processed, skipping"`.
+- **Regression — the baseline flow:** placed a plain order with no `DeliveryNote` field in the request body at all (confirms the optional parameter's default works for genuinely omitted data, not just an explicit null) and confirmed the full order → pay → cook → notify chain completed (`orders_cooking_started_total`, `orders_cooked_total`, `notifications_sent_total` all incremented correctly).
+- **Fresh-cluster reproducibility:** ran `minikube delete` + `setup.sh` from scratch. Came up clean on the first try — no bugs found, unlike both prior SSO plans' fresh-cluster runs. All 5 services `Running`, all 7 Argo CD Applications `Synced`/`Healthy`. Re-ran the idempotency redelivery test and a full order (with `DeliveryNote`) against this freshly built cluster independently — both passed identically to the pre-rebuild cluster, confirming nothing in this plan depends on manual/non-scripted setup steps.
+
+**Note:** `setup.sh` itself needed zero changes for this plan — every change was pure application code (4 service repos) plus documentation (AsyncAPI specs); there was no new infra/Helm/Keycloak config to script.
 
 ## Rollback / blast radius
 
