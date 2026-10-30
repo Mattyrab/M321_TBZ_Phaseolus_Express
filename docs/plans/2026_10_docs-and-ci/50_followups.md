@@ -6,7 +6,9 @@ This file exists so the conversation doesn't bloat the current plan. When someth
 
 ## Out of scope, parked for later
 
-- ⏳ <Item>. <One sentence on what and why-it-was-deferred. Link a file path or related plan if it'll need follow-up work.>
+- ⏳ **No test projects exist anywhere.** CI runs lint+build, not tests, because there's simply nothing to test yet (checked: zero `Microsoft.NET.Test.Sdk`/xunit/nunit/MSTest references in any of the 5 service repos). If real tests are ever added, the existing `ci.yml` in each repo would just need a `dotnet test` step appended.
+- ⏳ **No branch-protection rule requires CI to pass before merging.** The workflows run and report status, but nothing currently stops a merge if they fail — the rubric's "Isolierte CI-Pipelines" is satisfied by the pipelines existing and running, but enforcing them (Settings → Branches → require status checks) would be a stronger version of this if ever wanted.
+- ⏳ **The meta repo's CI is minimal (`bash -n` only).** No linting of the Kubernetes YAML manifests or Helm values in `k8s/`, and no validation that `setup.sh`'s Keycloak/RabbitMQ API calls are still well-formed. Deliberately kept cheap for this plan's scope; could grow into a real `kubectl apply --dry-run=client` / `yamllint` pass later.
 
 ---
 
