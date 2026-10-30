@@ -1,6 +1,6 @@
 # Docs & CI
 
-⏳ **Status:** scaffolded. Direction: TBD. Two small, independent fixes for the grading rubric's documentation (5 pts) and repo/deployment (5 pts) criteria — both mechanical enough to skip straight to an implementation doc, no design options to weigh.
+⏳ **Status:** implementation plan drafted. Direction: two Mermaid diagrams (service/data-flow, deployment topology) plus error-handling prose in the root README, aiming past "Ideal" toward "Maximal" (Step 1); a lint+build GitHub Actions workflow for each of the 5 service repos plus a minimal `bash -n setup.sh` check for the meta repo, since no test projects exist anywhere to run as "Tests" (Step 2).
 
 ## Why this exists
 
@@ -11,7 +11,7 @@ A full audit against the project's grading rubric (`docs/LB3_Projektarbeit_WIR.m
 ## Index
 
 - 📎 [`inputs.md`](./inputs.md) — user's source framing (verbatim)
-- ⏳ [`40_implementation.md`](./40_implementation.md) — step plan
+- ✅ [`40_implementation.md`](./40_implementation.md) — step plan
 - ⏳ [`50_followups.md`](./50_followups.md) — out-of-scope items parked for later
 
 ## Status legend
