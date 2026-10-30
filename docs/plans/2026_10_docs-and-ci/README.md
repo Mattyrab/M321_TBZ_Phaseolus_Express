@@ -1,6 +1,6 @@
 # Docs & CI
 
-⏳ **Status:** implementation plan drafted. Direction: two Mermaid diagrams (service/data-flow, deployment topology) plus error-handling prose in the root README, aiming past "Ideal" toward "Maximal" (Step 1); a lint+build GitHub Actions workflow for each of the 5 service repos plus a minimal `bash -n setup.sh` check for the meta repo, since no test projects exist anywhere to run as "Tests" (Step 2).
+✅ **Status:** complete. Both steps done and live-verified: two Mermaid diagrams plus error-handling prose in the root README, both rendered independently with `@mermaid-js/mermaid-cli` before committing; a lint+build GitHub Actions workflow in all 5 service repos plus a minimal `bash -n setup.sh` check in the meta repo, every one confirmed passing via a real post-merge CI run. Step 2 found and fixed a real bug along the way (WebApp's nested `.csproj` path) and ran into a genuine GitHub Actions quirk that briefly looked like a hard blocker — see `40_implementation.md` for both. Closes the grading rubric's documentation (5 pts) and repo/CI (5 pts) criteria. This was the last of the three plans scaffolded from the original grading-rubric audit.
 
 ## Why this exists
 
