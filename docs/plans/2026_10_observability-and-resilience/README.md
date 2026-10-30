@@ -1,6 +1,6 @@
 # Observability & Resilience
 
-⏳ **Status:** scaffolded. Direction: TBD. Two small, independent fixes for the grading rubric's observability (5 pts) and scaling/resilience (10 pts) criteria — both mechanical enough to skip straight to an implementation doc, no design options to weigh.
+✅ **Status:** complete. All three steps done and live-verified: success-path logging with `OrderId` correlation confirmed end-to-end across all four backend services; `OrderBeans` scaled to 2 replicas with genuine Service-level load distribution confirmed (after a `kubectl port-forward` false negative was caught and corrected); `Microsoft.Extensions.Http.Resilience`'s standard handler on BeanApp's one synchronous call, with real retry events observed against a genuine outage. Closes the grading rubric's observability (5 pts) and resilience/scaling (10 pts) criteria. See `40_implementation.md` for the full record and `50_followups.md` for what's parked (circuit-breaker not independently verified; only `OrderBeans` scales so far).
 
 ## Why this exists
 
@@ -11,7 +11,7 @@ A full audit against the project's grading rubric (`docs/LB3_Projektarbeit_WIR.m
 ## Index
 
 - 📎 [`inputs.md`](./inputs.md) — user's source framing (verbatim)
-- ⏳ [`40_implementation.md`](./40_implementation.md) — step plan
+- ✅ [`40_implementation.md`](./40_implementation.md) — step plan
 - ⏳ [`50_followups.md`](./50_followups.md) — out-of-scope items parked for later
 
 ## Status legend
