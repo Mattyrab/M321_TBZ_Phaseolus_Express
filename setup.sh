@@ -221,7 +221,6 @@ kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 # size limit for a plain `kubectl apply`.
 kubectl apply -n argocd --server-side --force-conflicts \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 
 # admin-ui-ingress plan: argocd-server serves TLS on its own by default, but
 # Traefik's websecure entrypoint (k8s/infra/admin-ui-ingress.yaml) already
@@ -240,12 +239,20 @@ kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 # Kubernetes-version-dependent difference in how `op: replace`/`op: add`
 # interact with a field that may or may not already be set. Strategic merge
 # replaces command/args wholesale, with no such ambiguity.
+#
+# Applied BEFORE the readiness wait below, not after: on a re-run against a
+# cluster whose argocd-server is already stuck (e.g. still carrying a bad
+# command/args from before this patch style existed), waiting first would
+# just watch the same broken pod time out and abort the whole script under
+# `set -e` -- never reaching the one command that would actually fix it.
+# Patching first means whatever pod the wait ends up watching is already
+# running the corrected config.
 kubectl patch deployment argocd-server -n argocd --type strategic -p '{
   "spec": {"template": {"spec": {"containers": [
     {"name": "argocd-server", "command": ["/usr/local/bin/argocd-server"], "args": ["--insecure"]}
   ]}}}
 }'
-kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
+kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 
 kubectl create secret generic repo-meta-phaseolus -n argocd \
   --from-literal=type=git \
