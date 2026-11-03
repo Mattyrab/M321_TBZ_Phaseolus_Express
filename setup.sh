@@ -231,10 +231,20 @@ kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 # ports 80 and 443 end up pointing at the same plaintext backend port either
 # way, so the existing direct port-forward below still works unchanged --
 # only the scheme in the final summary changes from https to http.
-kubectl patch deployment argocd-server -n argocd --type json -p '[
-  {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/usr/local/bin/argocd-server"]},
-  {"op":"add","path":"/spec/template/spec/containers/0/args","value":["--insecure"]}
-]'
+#
+# Strategic merge (the default patch type, keyed by container name), not a
+# JSON patch on a numeric index: a JSON "replace" on command/args produced a
+# broken container invocation on at least one real cluster (argv ended up
+# with the binary's own path duplicated as its first argument, crash-looping
+# with "unknown command" from argocd-server's own CLI parser) -- likely a
+# Kubernetes-version-dependent difference in how `op: replace`/`op: add`
+# interact with a field that may or may not already be set. Strategic merge
+# replaces command/args wholesale, with no such ambiguity.
+kubectl patch deployment argocd-server -n argocd --type strategic -p '{
+  "spec": {"template": {"spec": {"containers": [
+    {"name": "argocd-server", "command": ["/usr/local/bin/argocd-server"], "args": ["--insecure"]}
+  ]}}}
+}'
 kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
 
 kubectl create secret generic repo-meta-phaseolus -n argocd \
