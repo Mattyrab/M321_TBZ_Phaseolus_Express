@@ -531,6 +531,12 @@ start_port_forward argocd     argocd    argocd-server 8443:443
 # for RabbitMQ's "Log in with SSO" button (SSO admin-uis plan Step 4). Everything
 # else keeps using the plain-HTTP keycloak port-forward above.
 start_port_forward keycloak-tls infra   traefik 9443:443
+# admin-ui-ingress plan: Traefik's "web" entrypoint, Host-matched to
+# grafana/rabbitmq/keycloak.phaseolus.local (k8s/infra/admin-ui-ingress.yaml).
+# Needs the one-time hosts-file entry from the summary below -- can't be
+# scripted, since editing another machine's hosts file needs an interactive
+# admin/root prompt this script shouldn't assume it has.
+start_port_forward admin-ui infra       traefik 8000:80
 sleep 3
 
 log "Done"
@@ -555,11 +561,61 @@ echo
 echo "To reach BeanApp via Traefik (the real ingress path) instead, run in a separate terminal:"
 echo "  minikube service traefik -n infra --url"
 echo
-echo "Admin-ui-ingress: reach Grafana/RabbitMQ/Keycloak/Argo CD through Traefik's Host-based"
-echo "routes (k8s/infra/admin-ui-ingress.yaml) instead of one port-forward per tool. One-time"
-echo "setup: add these to your hosts file (127.0.0.1, any hostname) --"
+echo "Admin-ui-ingress: Grafana/RabbitMQ/Keycloak/Argo CD are also reachable through Traefik's"
+echo "Host-based routes (k8s/infra/admin-ui-ingress.yaml, port-forwards already running above)."
+echo "One-time setup this script can't do for you -- add these to your hosts file (127.0.0.1):"
 echo "  127.0.0.1 grafana.phaseolus.local rabbitmq.phaseolus.local keycloak.phaseolus.local argocd.phaseolus.local"
-echo "then just one new port-forward (reuses the keycloak-tls one above for argocd, same Traefik entrypoint):"
-echo "  kubectl port-forward svc/traefik 8000:80 -n infra"
-echo "and browse to http://grafana.phaseolus.local:8000, http://rabbitmq.phaseolus.local:8000,"
+echo "then browse to http://grafana.phaseolus.local:8000, http://rabbitmq.phaseolus.local:8000,"
 echo "http://keycloak.phaseolus.local:8000, https://argocd.phaseolus.local:9443 (self-signed TLS)."
+
+# ---------------------------------------------------------------------------
+# 9. Verify the admin UIs actually respond -- both the direct port-forwards
+#    and the Host-based admin-ui-ingress routes. Catches a broken deploy
+#    (e.g. a crash-looping argocd-server) immediately instead of only
+#    surfacing when someone tries to open the page later. Host-header checks
+#    work without the hosts-file edit above, since curl sends the Host header
+#    directly -- DNS resolution of the hostname itself is only needed by a
+#    real browser.
+# ---------------------------------------------------------------------------
+log "Verifying endpoints"
+
+ENDPOINT_FAILURES=0
+
+check_endpoint() {
+  local name="$1" url="$2" host_header="$3" expect="$4"
+  local code="" attempt
+  for attempt in $(seq 1 10); do
+    if [ -n "$host_header" ]; then
+      code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 -H "Host: $host_header" "$url" 2>/dev/null || true)
+    else
+      code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || true)
+    fi
+    [ "$code" = "$expect" ] && break
+    sleep 3
+  done
+  if [ "$code" = "$expect" ]; then
+    printf "  OK    %-20s %s\n" "$name" "$url"
+  else
+    printf "  FAIL  %-20s %s (expected %s, got '%s')\n" "$name" "$url" "$expect" "${code:-no response}"
+    ENDPOINT_FAILURES=$((ENDPOINT_FAILURES + 1))
+  fi
+}
+
+check_endpoint "BeanApp"            "http://localhost:5050/"                 ""                          200
+check_endpoint "Grafana (direct)"   "http://localhost:3000/"                 ""                          302
+check_endpoint "RabbitMQ (direct)"  "http://localhost:15672/"                ""                          200
+check_endpoint "Keycloak (direct)"  "http://localhost:8180/realms/phaseolus" ""                          200
+check_endpoint "Prometheus (gated)" "http://localhost:9091/"                 ""                          302
+check_endpoint "Argo CD (direct)"   "http://localhost:8443/"                 ""                          200
+check_endpoint "Grafana (ingress)"  "http://localhost:8000/"                 "grafana.phaseolus.local"   302
+check_endpoint "RabbitMQ (ingress)" "http://localhost:8000/"                 "rabbitmq.phaseolus.local"  200
+check_endpoint "Keycloak (ingress)" "http://localhost:8000/realms/phaseolus" "keycloak.phaseolus.local"  200
+check_endpoint "Argo CD (ingress)"  "https://localhost:9443/"                "argocd.phaseolus.local"    200
+
+echo
+if [ "$ENDPOINT_FAILURES" -eq 0 ]; then
+  echo "All endpoints responded as expected."
+else
+  echo "WARNING: $ENDPOINT_FAILURES endpoint(s) did not respond as expected -- see FAIL lines above." >&2
+  exit 1
+fi
