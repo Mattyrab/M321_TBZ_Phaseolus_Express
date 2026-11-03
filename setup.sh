@@ -223,6 +223,20 @@ kubectl apply -n argocd --server-side --force-conflicts \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 
+# admin-ui-ingress plan: argocd-server serves TLS on its own by default, but
+# Traefik's websecure entrypoint (k8s/infra/admin-ui-ingress.yaml) already
+# terminates TLS at the edge -- a backend that also tries to redirect plain
+# HTTP to HTTPS would loop forever, since it never sees a TLS connection to
+# redirect away from. --insecure makes it serve plain HTTP only. Both Service
+# ports 80 and 443 end up pointing at the same plaintext backend port either
+# way, so the existing direct port-forward below still works unchanged --
+# only the scheme in the final summary changes from https to http.
+kubectl patch deployment argocd-server -n argocd --type json -p '[
+  {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/usr/local/bin/argocd-server"]},
+  {"op":"add","path":"/spec/template/spec/containers/0/args","value":["--insecure"]}
+]'
+kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
+
 kubectl create secret generic repo-meta-phaseolus -n argocd \
   --from-literal=type=git \
   --from-literal=url="$META_REPO_URL" \
@@ -533,10 +547,19 @@ echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
 echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD (or 'Log in with SSO' via admin/phaseolus, through https://localhost:9443)"
 echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
 echo "  Prometheus          http://localhost:9091   (Keycloak login: admin / phaseolus)"
-echo "  Argo CD UI          https://localhost:8443   admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+echo "  Argo CD UI          http://localhost:8443    admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
 echo
 echo "To stop the port-forwards later:"
 echo "  awk -F: '{print \$2}' $PF_PID_FILE | xargs -r kill"
 echo
 echo "To reach BeanApp via Traefik (the real ingress path) instead, run in a separate terminal:"
 echo "  minikube service traefik -n infra --url"
+echo
+echo "Admin-ui-ingress: reach Grafana/RabbitMQ/Keycloak/Argo CD through Traefik's Host-based"
+echo "routes (k8s/infra/admin-ui-ingress.yaml) instead of one port-forward per tool. One-time"
+echo "setup: add these to your hosts file (127.0.0.1, any hostname) --"
+echo "  127.0.0.1 grafana.phaseolus.local rabbitmq.phaseolus.local keycloak.phaseolus.local argocd.phaseolus.local"
+echo "then just one new port-forward (reuses the keycloak-tls one above for argocd, same Traefik entrypoint):"
+echo "  kubectl port-forward svc/traefik 8000:80 -n infra"
+echo "and browse to http://grafana.phaseolus.local:8000, http://rabbitmq.phaseolus.local:8000,"
+echo "http://keycloak.phaseolus.local:8000, https://argocd.phaseolus.local:9443 (self-signed TLS)."
