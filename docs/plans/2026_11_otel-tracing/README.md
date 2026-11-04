@@ -1,6 +1,6 @@
 # OpenTelemetry Message Tracing
 
-⏳ **Status:** in progress (Steps 1-3 of 5 done and live-verified; see `40_implementation.md`). Direction: Grafana Tempo + Loki wired into the existing Grafana instance, with manual W3C `traceparent` propagation across RabbitMQ message headers. Add distributed tracing across the five services' RabbitMQ-based message flow with OpenTelemetry, closing the "Distributed Tracing" half of the grading rubric's observability criterion that `../2026_10_observability-and-resilience/` deliberately left open.
+⏳ **Status:** in progress (Steps 1-4 of 5 done and live-verified; see `40_implementation.md`). Step 4 confirmed the plan's core goal end-to-end: one single connected trace from a real browser order through all five services. Only Step 5 (final verification against the fully-merged state) remains. Direction: Grafana Tempo + Loki wired into the existing Grafana instance, with manual W3C `traceparent` propagation across RabbitMQ message headers. Add distributed tracing across the five services' RabbitMQ-based message flow with OpenTelemetry, closing the "Distributed Tracing" half of the grading rubric's observability criterion that `../2026_10_observability-and-resilience/` deliberately left open.
 
 ## Why this exists
 
