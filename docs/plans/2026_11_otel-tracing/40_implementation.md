@@ -68,13 +68,17 @@ In `PayBeancoins/Messaging/EventConsumerHostedService.cs`'s `HandleDeliveryAsync
 
 ### Step 5 — End-to-end verification against the live cluster
 
-⏳ **Do.** No new code — this step validates `10_target_shape.md`'s success criteria holistically, against all five services instrumented together.
+✅ **Do.** No new code was planned — this step validates `10_target_shape.md`'s success criteria holistically, against all five services instrumented together. One real fix came out of it anyway (below). All five repos were synced to their merged `main`, rebuilt, and redeployed fresh before testing, so every result below reflects the actual, fully-merged system — no standalone pods needed this time.
 
-**Verify.**
-- Place one real order via BeanApp's UI; confirm the resulting single trace's spans, names, and per-hop durations all look correct in Tempo/Grafana.
-- Click from a span in that trace into its correlated log lines via Grafana's trace-to-logs feature against the new Loki datasource (Q3) — confirm it actually jumps to the right log lines, not just that both datasources independently exist.
-- Deliberately break one hop (e.g. briefly scale PayBeancoins to 0 replicas, the same technique already used to test `setup.sh`'s endpoint checks in PR #31) and place another order; confirm the resulting trace visibly shows the failure or a stalled/incomplete span, rather than looking identical to a healthy trace.
-- Confirm `dotnet format --verify-no-changes` and `dotnet build` pass clean in all five repos' CI after the new packages are added.
+**Verify & Result:**
+
+- **Single trace, correct spans/names/timing.** ✅ Placed a real order through BeanApp's actual UI. Tempo showed one connected trace across all five real services (not standalone pods), correctly nested end-to-end, with plausible sub-second timing for every span except the intentionally-delayed cook step.
+
+- **Trace-to-logs click-through actually filters by trace.** ⚠️ found broken, ✅ fixed. The datasource config shipped in Step 1 had `filterByTraceID: false` and no `tags` mapping — meaning clicking a span's "Logs for this span" would only narrow by a time window, not actually find that trace's log lines. Fixed by adding a `tags` mapping (span's `service.name` → Loki's `container` label) and flipping `filterByTraceID: true`. Verified by querying Loki directly with the exact resulting query shape (`{container="beanapp"} |= "<traceId>"`) and confirming it finds the right log line.
+
+- **A broken hop is visibly distinguishable.** ✅ confirmed, but not the way originally planned. The plan's own text suggested scaling PayBeancoins to 0 replicas — tried this twice live and both times Argo CD's recursive self-heal (the same mechanism flagged in Step 2's followups) reverted the scale-down within ~15 seconds, too fast to reliably race against; the test order was processed normally both times. Switched to a better, deterministic alternative that doesn't fight GitOps at all: an order containing "Rotten Beans" triggers PayBeancoins' existing, intentional payment-failure simulation (`PayBeancoins/Program.cs`). The resulting trace is **more clearly distinguishable** than a stalled trace would have been — it explicitly shows `publish payment.failed` instead of `payment.succeeded`, stops after BeanNotifs (7 spans total vs. ~15+ on the happy path), and **has zero CookerBeaners spans**, since Cooker only ever binds to `payment.succeeded`. A reader doesn't need to count spans or notice an absence to tell this trace apart from a healthy one — the failed event name alone does it.
+
+- **CI green across all five repos.** ✅ confirmed. Checked each repo's latest `main` CI run post-merge (`gh run list --branch main --limit 1`) — all five `completed`/`success`.
 
 ## Rollback / blast radius
 
