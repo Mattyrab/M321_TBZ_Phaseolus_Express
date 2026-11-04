@@ -14,6 +14,14 @@
 # charts are intentionally NOT Argo CD-managed -- they're installed here directly via
 # helm and stay that way. Only the five services + this repo's own k8s/infra/
 # manifests are GitOps-managed.
+#
+# Pass --clean (or CLEAN=1) to tear down the existing minikube cluster first, for
+# a genuine clean-slate reinstall. Everything else in this script is additive --
+# helm upgrade --install, kubectl apply, kubectl patch -- so a cluster left in a
+# broken state by a prior run otherwise persists until something fixes it, not
+# wipes it. --clean is the escape hatch for drift a targeted fix can't reach;
+# it's slow (full image reload, RabbitMQ/Keycloak/Postgres reprovisioned from
+# scratch, all data lost) so it's opt-in, not the default.
 set -euo pipefail
 
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
@@ -24,6 +32,12 @@ KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-phaseolus}"
 RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-phaseolus}"
 GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-phaseolus}"
 ADMIN_UI_CLIENT_SECRET="${ADMIN_UI_CLIENT_SECRET:-phaseolus}"
+CLEAN="${CLEAN:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --clean) CLEAN=1 ;;
+  esac
+done
 
 META_REPO_URL="https://github.com/${GITHUB_USERNAME}/M321_TBZ_Phaseolus_Express.git"
 UPSTREAM_OWNER="Timposter8107"
@@ -96,6 +110,11 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Cluster
 # ---------------------------------------------------------------------------
+if [ "$CLEAN" = "1" ]; then
+  log "Clean slate: deleting existing minikube cluster"
+  minikube delete
+fi
+
 log "Starting minikube (--cpus=$MINIKUBE_CPUS --memory=$MINIKUBE_MEMORY)"
 minikube start --driver=docker --cpus="$MINIKUBE_CPUS" --memory="$MINIKUBE_MEMORY"
 
