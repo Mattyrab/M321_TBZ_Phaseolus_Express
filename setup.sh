@@ -308,6 +308,15 @@ helm upgrade --install alloy grafana/alloy -n infra --version 1.15.0 \
 # for why. tracesToLogsV2 wires Tempo's spans to click through into Loki's
 # matching log lines (Tempo's query port is 3200, not Loki's 3100 -- easy to
 # mix up, cost a round of debugging here).
+#
+# Step 5 fix: filterByTraceID was left false with no tags mapping, which only
+# narrows the resulting Loki query by time window, not to the actual trace --
+# not a real "jump to this trace's logs" experience. The tag maps each span's
+# service.name resource attribute to Loki's container label (both set to the
+# same OTEL_SERVICE_NAME value, e.g. "beanapp"), and filterByTraceID appends a
+# plain substring match on the trace ID -- confirmed live that the resulting
+# query, e.g. {container="beanapp"} |= "<traceId>", actually finds the
+# log line carrying that trace ID (present via Q4's ActivityTrackingOptions).
 cat > /tmp/phaseolus-grafana-values.yaml <<EOF
 grafana:
   env:
@@ -333,8 +342,11 @@ grafana:
           datasourceUid: loki
           spanStartTimeShift: "-5m"
           spanEndTimeShift: "5m"
-          filterByTraceID: false
+          filterByTraceID: true
           filterBySpanID: false
+          tags:
+            - key: service.name
+              value: container
     - name: Loki
       type: loki
       access: proxy
