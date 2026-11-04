@@ -25,7 +25,7 @@
 set -euo pipefail
 
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
-MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-8192}"
+MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-10240}"
 GITHUB_USERNAME="${GITHUB_USERNAME:-Mattyrab}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-phaseolus}"
@@ -129,6 +129,9 @@ log "Installing infra Helm charts"
 helm repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
 helm repo add traefik https://traefik.github.io/charts >/dev/null
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+helm repo add grafana-community https://grafana-community.github.io/helm-charts >/dev/null
+# grafana-community doesn't (yet) host Alloy -- still on the older grafana/ repo.
+helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
 helm repo update >/dev/null
 
 # SSO admin-uis plan Step 4: rabbitmq_auth_backend_oauth2 hard-requires https://
@@ -196,6 +199,99 @@ helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1 \
   --set ports.promgate.exposedPort=9091 \
   --set ports.promgate.protocol=TCP
 
+# otel-tracing plan Step 1: a tracing backend (Tempo) + log aggregation (Loki),
+# so the message-tracing work due in later steps has somewhere to send spans and
+# somewhere for Grafana to jump to correlated logs from a trace. All three charts
+# below default to minimal, single-instance config -- plenty for this project's
+# demo-scale traffic; no object storage or clustering needed.
+#
+# grafana/tempo is deprecated (migrated to grafana-community/helm-charts on
+# 2026-01-30) -- using the current grafana-community/tempo chart instead.
+helm upgrade --install tempo grafana-community/tempo -n infra --version 3.2.1
+
+# grafana-community/loki (replaces the old, deprecated grafana/loki-stack).
+# auth_enabled=false: single-tenant project, no need for per-request
+# X-Scope-OrgID headers on every read/write. resultsCache/chunksCache disabled
+# (memcached sidecars meant for production query load, not needed here --
+# enabling them by default caused real "Insufficient memory" scheduling
+# failures against a plain single-binary deployment at this scale).
+cat > /tmp/phaseolus-loki-values.yaml <<'EOF'
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  storage:
+    type: filesystem
+deploymentMode: SingleBinary
+singleBinary:
+  replicas: 1
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+resultsCache:
+  enabled: false
+chunksCache:
+  enabled: false
+EOF
+helm upgrade --install loki grafana-community/loki -n infra --version 20.4.1 \
+  -f /tmp/phaseolus-loki-values.yaml
+
+# grafana/promtail (Loki's old log-shipping agent) is also deprecated, with no
+# migrated replacement chart -- Grafana Alloy is the actively maintained
+# successor, so it's used here instead even though it's a different tool.
+# Config below is the standard "ship every pod's container logs to Loki"
+# pipeline: discover all pods, relabel namespace/pod/container onto each log
+# stream, write to Loki's gateway (no X-Scope-OrgID needed, auth disabled above).
+cat > /tmp/phaseolus-alloy-values.yaml <<'EOF'
+alloy:
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.infra.svc.cluster.local/loki/api/v1/push"
+        }
+      }
+EOF
+helm upgrade --install alloy grafana/alloy -n infra --version 1.15.0 \
+  -f /tmp/phaseolus-alloy-values.yaml
+
 # SSO admin-uis plan Step 2: Grafana's generic_oauth has separate auth_url
 # (browser-facing, via the keycloak port-forward) vs token_url/api_url
 # (in-cluster DNS, reached by Grafana's own backend) -- same Authority vs
@@ -205,7 +301,14 @@ helm upgrade --install traefik traefik/traefik -n infra --version 41.6.1 \
 # client_secret is passed via $__env{} + a plain env var, not inlined in
 # grafana.ini, because the chart's assertNoLeakedSecrets check refuses to
 # template a literal secret value into grafana.ini directly.
-cat > /tmp/phaseolus-grafana-oauth-values.yaml <<EOF
+#
+# otel-tracing plan Step 1: additionalDataSources registers Tempo and Loki
+# (installed above) against this same, already-running Grafana instance,
+# rather than standing up a separate tracing UI -- see that plan's 20_options.md
+# for why. tracesToLogsV2 wires Tempo's spans to click through into Loki's
+# matching log lines (Tempo's query port is 3200, not Loki's 3100 -- easy to
+# mix up, cost a round of debugging here).
+cat > /tmp/phaseolus-grafana-values.yaml <<EOF
 grafana:
   env:
     GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: "$ADMIN_UI_CLIENT_SECRET"
@@ -220,10 +323,27 @@ grafana:
       token_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/token
       api_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/userinfo
       allow_sign_up: true
+  additionalDataSources:
+    - name: Tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.infra.svc.cluster.local:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-5m"
+          spanEndTimeShift: "5m"
+          filterByTraceID: false
+          filterBySpanID: false
+    - name: Loki
+      type: loki
+      access: proxy
+      uid: loki
+      url: http://loki-gateway.infra.svc.cluster.local
 EOF
 
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n infra --version 91.8.2 \
-  -f /tmp/phaseolus-grafana-oauth-values.yaml \
+  -f /tmp/phaseolus-grafana-values.yaml \
   --set grafana.adminPassword="$GRAFANA_PASSWORD"
 
 log "Waiting for RabbitMQ and Keycloak to be ready"
