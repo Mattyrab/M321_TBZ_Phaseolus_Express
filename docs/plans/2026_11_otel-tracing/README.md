@@ -1,6 +1,6 @@
 # OpenTelemetry Message Tracing
 
-⏳ **Status:** in progress (Steps 1-4 of 5 done and live-verified; see `40_implementation.md`). Step 4 confirmed the plan's core goal end-to-end: one single connected trace from a real browser order through all five services. Only Step 5 (final verification against the fully-merged state) remains. Direction: Grafana Tempo + Loki wired into the existing Grafana instance, with manual W3C `traceparent` propagation across RabbitMQ message headers. Add distributed tracing across the five services' RabbitMQ-based message flow with OpenTelemetry, closing the "Distributed Tracing" half of the grading rubric's observability criterion that `../2026_10_observability-and-resilience/` deliberately left open.
+✅ **Status:** complete. All five steps done and live-verified against the fully-merged system: a single order placed through BeanApp's real UI produces one connected trace spanning all five services (BeanApp → OrderBeans → PayBeancoins → CookerBeaners/BeanNotifs), with correlated logs one click away in Grafana (a real gap in that correlation was found and fixed during Step 5) and payment failures visibly distinguishable from the happy path. Closes the grading rubric's "Distributed Tracing" half of the observability criterion that `../2026_10_observability-and-resilience/` deliberately left open. See `40_implementation.md` for the full step-by-step record, including two things the plan got wrong and corrected live: the fire-and-forget `CookAsync` "gotcha" that turned out not to be real (Step 3), and the originally-planned pod-outage failure test that Argo CD's self-heal made impractical, replaced with a cleaner deterministic alternative (Step 5).
 
 ## Why this exists
 
@@ -13,7 +13,7 @@ A full audit against the project's grading rubric (`docs/LB3_Projektarbeit_WIR.m
 - ✅ [`10_target_shape.md`](./10_target_shape.md) — what the change must produce
 - ✅ [`20_options.md`](./20_options.md) — design options with pros/cons
 - ✅ [`30_open_questions.md`](./30_open_questions.md) — decisions that block implementation
-- ⏳ [`40_implementation.md`](./40_implementation.md) — step plan
+- ✅ [`40_implementation.md`](./40_implementation.md) — step plan
 - ⏳ [`50_followups.md`](./50_followups.md) — out-of-scope items parked for later
 
 ## Status legend
