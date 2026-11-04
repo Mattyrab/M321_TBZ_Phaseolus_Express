@@ -6,7 +6,7 @@ This file exists so the conversation doesn't bloat the current plan. When someth
 
 ## Out of scope, parked for later
 
-- ⏳ <Item>. <One sentence on what and why-it-was-deferred. Link a file path or related plan if it'll need follow-up work.>
+- ⏳ **No scripted/documented way to temporarily test against a live Argo CD-managed Deployment without fighting self-heal.** Found during Step 2: the App-of-Apps structure (`phaseolus-root` → `orderbeans`/`paybeancoins` Applications → their Deployments) has `selfHeal: true` at every level, so a direct `kubectl apply`/`kubectl patch` on a managed resource — or even on a child Application's own `syncPolicy`, trying to disable its self-heal — gets silently reverted by the level above. Worked around it this time with standalone unmanaged pods (see `40_implementation.md` Step 2's Result), but there's no written-down, repeatable recipe for this (e.g. a documented `argocd app set <name> --sync-policy none` + restore sequence) — worth one if this comes up again.
 
 ---
 
