@@ -240,37 +240,6 @@ kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 # size limit for a plain `kubectl apply`.
 kubectl apply -n argocd --server-side --force-conflicts \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# admin-ui-ingress plan: argocd-server serves TLS on its own by default, but
-# Traefik's websecure entrypoint (k8s/infra/admin-ui-ingress.yaml) already
-# terminates TLS at the edge -- a backend that also tries to redirect plain
-# HTTP to HTTPS would loop forever, since it never sees a TLS connection to
-# redirect away from. --insecure makes it serve plain HTTP only. Both Service
-# ports 80 and 443 end up pointing at the same plaintext backend port either
-# way, so the existing direct port-forward below still works unchanged --
-# only the scheme in the final summary changes from https to http.
-#
-# Strategic merge (the default patch type, keyed by container name), not a
-# JSON patch on a numeric index: a JSON "replace" on command/args produced a
-# broken container invocation on at least one real cluster (argv ended up
-# with the binary's own path duplicated as its first argument, crash-looping
-# with "unknown command" from argocd-server's own CLI parser) -- likely a
-# Kubernetes-version-dependent difference in how `op: replace`/`op: add`
-# interact with a field that may or may not already be set. Strategic merge
-# replaces command/args wholesale, with no such ambiguity.
-#
-# Applied BEFORE the readiness wait below, not after: on a re-run against a
-# cluster whose argocd-server is already stuck (e.g. still carrying a bad
-# command/args from before this patch style existed), waiting first would
-# just watch the same broken pod time out and abort the whole script under
-# `set -e` -- never reaching the one command that would actually fix it.
-# Patching first means whatever pod the wait ends up watching is already
-# running the corrected config.
-kubectl patch deployment argocd-server -n argocd --type strategic -p '{
-  "spec": {"template": {"spec": {"containers": [
-    {"name": "argocd-server", "command": ["/usr/local/bin/argocd-server"], "args": ["--insecure"]}
-  ]}}}
-}'
 kubectl wait --for=condition=Ready pods --all -n argocd --timeout=180s
 
 kubectl create secret generic repo-meta-phaseolus -n argocd \
@@ -567,12 +536,6 @@ start_port_forward argocd     argocd    argocd-server 8443:443
 # for RabbitMQ's "Log in with SSO" button (SSO admin-uis plan Step 4). Everything
 # else keeps using the plain-HTTP keycloak port-forward above.
 start_port_forward keycloak-tls infra   traefik 9443:443
-# admin-ui-ingress plan: Traefik's "web" entrypoint, Host-matched to
-# grafana/rabbitmq/keycloak.phaseolus.local (k8s/infra/admin-ui-ingress.yaml).
-# Needs the one-time hosts-file entry from the summary below -- can't be
-# scripted, since editing another machine's hosts file needs an interactive
-# admin/root prompt this script shouldn't assume it has.
-start_port_forward admin-ui infra       traefik 8000:80
 sleep 3
 
 log "Done"
@@ -589,43 +552,28 @@ echo "  Grafana             http://localhost:3000   admin / $GRAFANA_PASSWORD"
 echo "  RabbitMQ management http://localhost:15672   phaseolus / $RABBITMQ_PASSWORD (or 'Log in with SSO' via admin/phaseolus, through https://localhost:9443)"
 echo "  Keycloak admin      http://localhost:8180    admin / $KEYCLOAK_ADMIN_PASSWORD (realm: master)"
 echo "  Prometheus          http://localhost:9091   (Keycloak login: admin / phaseolus)"
-echo "  Argo CD UI          http://localhost:8443    admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+echo "  Argo CD UI          https://localhost:8443   admin / \$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
 echo
 echo "To stop the port-forwards later:"
 echo "  awk -F: '{print \$2}' $PF_PID_FILE | xargs -r kill"
 echo
 echo "To reach BeanApp via Traefik (the real ingress path) instead, run in a separate terminal:"
 echo "  minikube service traefik -n infra --url"
-echo
-echo "Admin-ui-ingress: Grafana/RabbitMQ/Keycloak/Argo CD are also reachable through Traefik's"
-echo "Host-based routes (k8s/infra/admin-ui-ingress.yaml, port-forwards already running above)."
-echo "One-time setup this script can't do for you -- add these to your hosts file (127.0.0.1):"
-echo "  127.0.0.1 grafana.phaseolus.local rabbitmq.phaseolus.local keycloak.phaseolus.local argocd.phaseolus.local"
-echo "then browse to http://grafana.phaseolus.local:8000, http://rabbitmq.phaseolus.local:8000,"
-echo "http://keycloak.phaseolus.local:8000, https://argocd.phaseolus.local:9443 (self-signed TLS)."
 
 # ---------------------------------------------------------------------------
-# 9. Verify the admin UIs actually respond -- both the direct port-forwards
-#    and the Host-based admin-ui-ingress routes. Catches a broken deploy
-#    (e.g. a crash-looping argocd-server) immediately instead of only
-#    surfacing when someone tries to open the page later. Host-header checks
-#    work without the hosts-file edit above, since curl sends the Host header
-#    directly -- DNS resolution of the hostname itself is only needed by a
-#    real browser.
+# 9. Verify the admin UIs actually respond. Catches a broken deploy (e.g. a
+#    crash-looping argocd-server) immediately instead of only surfacing when
+#    someone tries to open the page later.
 # ---------------------------------------------------------------------------
 log "Verifying endpoints"
 
 ENDPOINT_FAILURES=0
 
 check_endpoint() {
-  local name="$1" url="$2" host_header="$3" expect="$4"
+  local name="$1" url="$2" expect="$3"
   local code="" attempt
   for attempt in $(seq 1 10); do
-    if [ -n "$host_header" ]; then
-      code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 -H "Host: $host_header" "$url" 2>/dev/null || true)
-    else
-      code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || true)
-    fi
+    code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null || true)
     [ "$code" = "$expect" ] && break
     sleep 3
   done
@@ -637,16 +585,12 @@ check_endpoint() {
   fi
 }
 
-check_endpoint "BeanApp"            "http://localhost:5050/"                 ""                          200
-check_endpoint "Grafana (direct)"   "http://localhost:3000/"                 ""                          302
-check_endpoint "RabbitMQ (direct)"  "http://localhost:15672/"                ""                          200
-check_endpoint "Keycloak (direct)"  "http://localhost:8180/realms/phaseolus" ""                          200
-check_endpoint "Prometheus (gated)" "http://localhost:9091/"                 ""                          302
-check_endpoint "Argo CD (direct)"   "http://localhost:8443/"                 ""                          200
-check_endpoint "Grafana (ingress)"  "http://localhost:8000/"                 "grafana.phaseolus.local"   302
-check_endpoint "RabbitMQ (ingress)" "http://localhost:8000/"                 "rabbitmq.phaseolus.local"  200
-check_endpoint "Keycloak (ingress)" "http://localhost:8000/realms/phaseolus" "keycloak.phaseolus.local"  200
-check_endpoint "Argo CD (ingress)"  "https://localhost:9443/"                "argocd.phaseolus.local"    200
+check_endpoint "BeanApp"    "http://localhost:5050/"                 200
+check_endpoint "Grafana"    "http://localhost:3000/"                 302
+check_endpoint "RabbitMQ"   "http://localhost:15672/"                200
+check_endpoint "Keycloak"   "http://localhost:8180/realms/phaseolus" 200
+check_endpoint "Prometheus" "http://localhost:9091/"                 302
+check_endpoint "Argo CD"    "https://localhost:8443/"                200
 
 echo
 if [ "$ENDPOINT_FAILURES" -eq 0 ]; then
