@@ -317,6 +317,11 @@ helm upgrade --install alloy grafana/alloy -n infra --version 1.15.0 \
 # plain substring match on the trace ID -- confirmed live that the resulting
 # query, e.g. {container="beanapp"} |= "<traceId>", actually finds the
 # log line carrying that trace ID (present via Q4's ActivityTrackingOptions).
+#
+# Tempo's uid is pinned explicitly (Loki's already was) so BeanApp's Admin
+# page can deep-link into Grafana Explore with a fixed, known datasource uid
+# -- without this, Grafana auto-generates a random uid per install, which
+# would silently break that link on every fresh cluster.
 cat > /tmp/phaseolus-grafana-values.yaml <<EOF
 grafana:
   env:
@@ -336,6 +341,7 @@ grafana:
     - name: Tempo
       type: tempo
       access: proxy
+      uid: tempo
       url: http://tempo.infra.svc.cluster.local:3200
       jsonData:
         tracesToLogsV2:
