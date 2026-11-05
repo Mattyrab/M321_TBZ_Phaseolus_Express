@@ -158,6 +158,36 @@ management.oauth_client_id = rabbitmq-client
 management.oauth_provider_url = https://localhost:9443/realms/phaseolus
 management.oauth_scopes = openid"
 
+# Browser cookies are scoped by domain, not port -- a Keycloak session cookie
+# set while logging into BeanApp's admin page (via localhost:8180) is also
+# sent on requests to localhost:15672 and :9443, since they're all just
+# "localhost" to the cookie jar. Enough accumulated Keycloak-related cookies
+# push the request's Cookie header past Cowboy's default 4096-byte limit,
+# and RabbitMQ's management UI returns a bare 431 with no visible error --
+# reproduced live with a simple oversized Cookie header (no real login
+# needed to trigger it). advancedConfiguration is the Erlang-syntax
+# advanced.config file, a different format from extraConfiguration's plain
+# rabbitmq.conf key=value syntax above -- this raises Cowboy's limit rather
+# than fixing the underlying cross-port cookie sharing (that would need
+# giving each admin tool its own hostname, reverted in PR #34 as
+# more complexity than this project's time budget could justify).
+#
+# --set-file, not --set-string: Helm's --set mini-language treats [ ] { }
+# as its own list/map-index syntax, so passing this Erlang config's actual
+# brackets through --set-string fails with a cryptic "error parsing index"
+# -- found live when the first attempt at this fix silently produced an
+# empty advancedConfiguration value instead of erroring loudly.
+cat > /tmp/phaseolus-rabbitmq-advanced.config <<'EOF'
+[
+  { rabbitmq_management, [
+      { listener, [
+          { cowboy_opts, [{ max_header_value_length, 262144 } ]}
+      ]}
+    ]
+  }
+].
+EOF
+
 helm upgrade --install rabbitmq bitnami/rabbitmq -n infra --version 16.0.14 \
   --set auth.username=phaseolus \
   --set auth.password="$RABBITMQ_PASSWORD" \
@@ -165,6 +195,7 @@ helm upgrade --install rabbitmq bitnami/rabbitmq -n infra --version 16.0.14 \
   --set image.repository=bitnamilegacy/rabbitmq \
   --set volumePermissions.image.repository=bitnamilegacy/os-shell \
   --set-string extraConfiguration="$RABBITMQ_EXTRA_CONFIG" \
+  --set-file advancedConfiguration=/tmp/phaseolus-rabbitmq-advanced.config \
   --set extraPlugins="rabbitmq_auth_backend_oauth2" \
   --set resourcesPreset=large
 
