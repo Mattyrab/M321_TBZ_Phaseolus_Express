@@ -399,6 +399,11 @@ for repo in "${!REPO_IMAGE[@]}"; do
   image="${REPO_IMAGE[$repo]}"
   if [ ! -d "$repo" ]; then
     git clone "https://github.com/${UPSTREAM_OWNER}/${repo}.git" "$repo"
+  else
+    # Without this, a re-run on a machine that already has the repo cloned
+    # never picks up new commits -- it just rebuilds whatever was checked out
+    # the first time, forever, silently going stale.
+    git -C "$repo" pull --ff-only
   fi
   docker build -t "${image}:dev" "$repo"
   minikube image load "${image}:dev"
