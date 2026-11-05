@@ -67,6 +67,63 @@ flowchart TB
     OP2 -->|gates| PR2
 ```
 
+**Order lifecycle (sequence)** — the two flowcharts above show connections, not ordering; this shows the actual sequence of calls and events for one order, start to finish. Filled arrowheads are synchronous calls, open arrowheads (`-)`) are asynchronous RabbitMQ pub/sub, matching the convention above:
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant BeanApp
+    participant KC as Keycloak
+    participant OrderBeans
+    participant RMQ as RabbitMQ
+    participant PayBeancoins
+    participant CookerBeaners
+    participant BeanNotifs
+
+    rect rgb(245, 245, 245)
+    note over User,BeanNotifs: Place an order
+    User->>+BeanApp: Checkout
+    BeanApp->>+KC: client-credentials token
+    KC-->>-BeanApp: access token
+    BeanApp->>+OrderBeans: POST /orders (JWT)
+    OrderBeans->>+KC: validate JWT
+    KC-->>-OrderBeans: ok
+    OrderBeans-)RMQ: order.created
+    OrderBeans-->>-BeanApp: 202 Accepted {orderId}
+    BeanApp-->>-User: "Payment accepted!"
+
+    RMQ-)+PayBeancoins: order.created
+    alt payment succeeds
+        PayBeancoins-)RMQ: payment.succeeded
+    else item named "Rotten Beans" (deterministic test failure)
+        PayBeancoins-)RMQ: payment.failed
+    end
+    deactivate PayBeancoins
+
+    RMQ-)+BeanNotifs: payment.succeeded / payment.failed
+    deactivate BeanNotifs
+    RMQ-)+CookerBeaners: payment.succeeded only
+    CookerBeaners-)RMQ: order.cooking-started
+    RMQ-)+BeanNotifs: order.cooking-started
+    deactivate BeanNotifs
+    note over CookerBeaners: cooks asynchronously<br/>(fire-and-forget delay,<br/>not on the consumer thread)
+    CookerBeaners-)RMQ: order.cooked
+    deactivate CookerBeaners
+    RMQ-)+BeanNotifs: order.cooked
+    deactivate BeanNotifs
+    end
+
+    rect rgb(245, 245, 245)
+    note over User,BeanNotifs: Admin reviews the event log
+    User->>+BeanApp: GET /Admin
+    BeanApp->>+BeanNotifs: GET /notifications (admin's own JWT)
+    BeanNotifs->>+KC: validate JWT + admin role
+    KC-->>-BeanNotifs: ok
+    BeanNotifs-->>-BeanApp: notification list
+    BeanApp-->>-User: rendered event log
+    end
+```
+
 ### Error handling & resilience
 
 - **Bounded retry with backoff.** Each RabbitMQ consumer re-publishes a failed message to the same routing key with an incrementing `x-retry-count` header (survives pod restarts, since the count lives in the message, not in memory), capped at 5 attempts before logging and dropping — no dead-letter exchange. See `docs/plans/2026_10_message-contracts-hardening/00_current_state.md`.
