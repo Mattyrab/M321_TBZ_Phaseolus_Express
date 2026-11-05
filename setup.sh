@@ -337,6 +337,15 @@ grafana:
       token_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/token
       api_url: http://keycloak.infra.svc.cluster.local/realms/phaseolus/protocol/openid-connect/userinfo
       allow_sign_up: true
+    users:
+      # otel-tracing plan: Grafana's default auto_assign_org_role is Viewer,
+      # which lacks the datasources:explore RBAC permission -- any OAuth
+      # login (admitted unconditionally per Q4, no role_attribute_path) was
+      # silently bounced from /explore back to the home dashboard, no error
+      # shown, regardless of the URL's own contents. Editor is enough for
+      # Explore; consistent with Q4's "any login is admitted" rather than
+      # gating specifically on the Keycloak admin role.
+      auto_assign_org_role: Editor
   additionalDataSources:
     - name: Tempo
       type: tempo
