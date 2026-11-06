@@ -39,7 +39,7 @@ Resolve every question to ✅ or ❌ before starting `40_implementation.md`. If 
 
 **Why it matters.** Directly blocks setting up the Argo CD App-of-Apps root Application in this meta repo — it needs to know what kind of source each child Application points at.
 
-**Resolution.** ✅ 2026-09-25 — (a) plain Kubernetes YAML under a `/deploy` folder in each service repo (`Deployment`, `Service`, and, where the service is directly Traefik-exposed, an `IngressRoute`/`Ingress`). No Helm or Kustomize — five near-identical ASP.NET Core services (per Q2) don't need templating machinery yet; each repo's Argo CD child Application in the App-of-Apps root simply points at `<repo>/deploy`.
+**Resolution.** ✅ 2026-09-25 — (a) plain Kubernetes YAML under a `/deploy` folder in each service repo (`Deployment`, `Service`, and, where the service is directly Traefik-exposed, an `IngressRoute`). No Helm or Kustomize — five near-identical ASP.NET Core services (per Q2) don't need templating machinery yet; each repo's Argo CD child Application in the App-of-Apps root simply points at `<repo>/deploy`.
 
 ---
 
