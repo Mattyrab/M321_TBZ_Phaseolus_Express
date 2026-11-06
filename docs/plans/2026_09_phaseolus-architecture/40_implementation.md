@@ -123,7 +123,7 @@ Two real bugs found and fixed along the way:
 
 ### Step 11 — Expose BeanApp via Traefik
 
-✅ **Do.** Add an `IngressRoute`/`Ingress` (wherever each service's own manifest lives, per Q3) so Traefik is the only externally-reachable path to BeanApp.
+✅ **Do.** Add an `IngressRoute` (wherever each service's own manifest lives, per Q3) so Traefik is the only externally-reachable path to BeanApp.
 
 **Verify.** The Traefik-exposed host/path reaches BeanApp; none of the other four services are reachable from outside the cluster (no stray `NodePort`/`LoadBalancer` Services).
 
